@@ -1,0 +1,52 @@
+[project]
+name = "sulku"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Teemu Autto", email = "teemu@rautakuu.org" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.4.2",
+    "fastapi>=0.139.2",
+    "fasttext>=0.9.3",
+    "jinja2>=3.1.6",
+    "openai>=2.46.0",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "ratelimit>=2.2.1",
+    "requests>=2.34.2",
+    "scikit-learn>=1.9.0",
+    "scikit-learn-intelex>=2026.1.0",
+    "tiktoken>=0.13.0",
+    "trafilatura>=2.1.0",
+    "uvicorn>=0.51.0",
+]
+
+[project.scripts]
+sulku = "sulku.cli:main"
+
+[tool.black]
+line-length = 120
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[build-system]
+requires = ["uv_build>=0.9.17,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "black>=26.5.1",
+    "httpx>=0.28.1",
+    "ipykernel>=7.3.0",
+    "pyright>=1.1.411",
+    "pytest>=9.1.1",
+    "requests>=2.34.2",
+    "ruff>=0.15.22",
+    "spacy>=3.8.14",
+]

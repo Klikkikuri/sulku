@@ -1,0 +1,92 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/go
+{
+	"name": "Sulku",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": ".."
+	},
+    "workspaceFolder": "/app",
+    "mounts": [
+        "source=${localWorkspaceFolder},target=/app,type=bind,consistency=cached",
+		"type=volume,target=/app/.venv",
+        "source=${localEnv:HOME}/.gemini,target=/home/vscode/.gemini,type=bind,consistency=cached"
+    ],
+
+	"features": {
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+			"moby": false,  // Not supported on trixie
+			"installDockerBuildx": true,
+			"version": "latest",
+			"dockerDashComposeVersion": "none"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"DavidAnson.vscode-markdownlint",
+				"ms-python.python",
+				"ms-python.isort",
+				"stkb.rewrap",
+				"tamasfe.even-better-toml",
+				"ms-python.debugpy",
+				"ms-python.black-formatter",
+				"charliermarsh.ruff",
+				"njpwerner.autodocstring",
+				"GitHub.vscode-pull-request-github",
+				"ms-toolsai.datawrangler",
+				"samuelcolvin.jinjahtml"
+			],
+			"settings": {
+				"files.eol": "\n",
+
+				// Python settings
+				"python.defaultInterpreterPath": "/app/.venv/bin/python",
+				"python.formatting.provider": "black",
+				"python.analysis.importFormat": "relative",
+				"python.analysis.supportDocstringTemplate": true,
+				"python.testing.pytestEnabled": true,
+				"python.analysis.typeCheckingMode": "standard",
+				"ruff.enable": true,
+				"python.linting.enabled": true,
+				"isort.check": true,
+				"autopep8.importStrategy": "fromEnvironment",
+				"black-formatter.importStrategy": "fromEnvironment",
+				"isort.importStrategy": "fromEnvironment",
+    			"ruff.importStrategy": "fromEnvironment",
+				"[python]": {
+					"editor.rulers": [120],
+    				"editor.defaultFormatter": "charliermarsh.ruff"
+				},
+				"rewrap.wrappingColumn": 120,
+
+				// No A/B testing
+				"python.experiments.enabled": false,
+
+				// Common AutoDocstring settings
+				"autoDocstring.docstringFormat": "sphinx",
+				"autoDocstring.startOnNewLine": true,
+
+				"cSpell.language": "en-GB,en,fi",
+				"cSpell.import": [
+					"${workspaceFolder}/.devcontainer/cspell.config.yaml"
+				]
+			}
+		}
+	},
+
+
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+
+	// Install pre-commit hooks.
+	// "postCreateCommand": "which pre-commit && pre-commit install --install-hooks",
+
+	// Configure tool-specific properties.
+	// "customizations": {},
+
+	"remoteUser": "vscode"
+}
