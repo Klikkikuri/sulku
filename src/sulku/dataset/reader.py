@@ -215,12 +215,10 @@ class FileDataset(Sequence[DatasetItem]):
         return len(self._files)
 
     @overload
-    def __getitem__(self, index: int) -> DatasetItem:
-        ...
+    def __getitem__(self, index: int) -> DatasetItem: ...
 
     @overload
-    def __getitem__(self, index: slice) -> list[DatasetItem]:
-        ...
+    def __getitem__(self, index: slice) -> list[DatasetItem]: ...
 
     def __getitem__(
         self, index: Union[int, slice]
@@ -262,9 +260,7 @@ class FileDataset(Sequence[DatasetItem]):
         :raises ValueError: If sample size k is larger than the dataset.
         """
         if k > len(self):
-            raise ValueError(
-                f"Sample size {k} is larger than dataset size {len(self)}"
-            )
+            raise ValueError(f"Sample size {k} is larger than dataset size {len(self)}")
 
         if seed is not None:
             rng = random.Random(seed)
@@ -296,6 +292,33 @@ class FileDataset(Sequence[DatasetItem]):
         new_ds.item_class = self.item_class
         new_ds.filter_fn = self.filter_fn
         new_ds._files = self._files
+        return new_ds
+
+    def filter(self, predicate: Callable[[DatasetItem], bool]) -> "FileDataset":
+        """
+        Return a new FileDataset containing only items that match the predicate.
+
+        This eagerly evaluates the predicate on all items currently in the dataset.
+
+        :param predicate: A callable that takes a DatasetItem and returns a boolean.
+        :type predicate: Callable[[DatasetItem], bool]
+        :return: A new filtered FileDataset instance.
+        :rtype: FileDataset
+        """
+        filtered_files = []
+        for f in self._files:
+            item = self.item_class(f, self.metadata_loader)
+            if predicate(item):
+                filtered_files.append(f)
+
+        new_ds = FileDataset.__new__(FileDataset)
+        new_ds.root_path = self.root_path
+        new_ds.pattern = self.pattern
+        new_ds.recursive = self.recursive
+        new_ds.metadata_loader = self.metadata_loader
+        new_ds.item_class = self.item_class
+        new_ds.filter_fn = self.filter_fn
+        new_ds._files = filtered_files
         return new_ds
 
 
@@ -359,3 +382,61 @@ def yaml_front_matter_loader(path: Path) -> dict[str, Any]:
         pass
 
     return metadata
+
+
+def min_words_filter(min_words: int) -> Callable[[DatasetItem], bool]:
+    """
+    Create a predicate to filter out stubs / short articles.
+
+    Keeps only articles with a word count of at least min_words.
+
+    :param min_words: Minimum number of words to keep an article.
+    :type min_words: int
+    :return: Predicate callable.
+    :rtype: Callable[[DatasetItem], bool]
+    """
+    from sulku.utils import count_words
+
+    return lambda item: count_words(item.content) >= min_words
+
+
+def non_empty_filter() -> Callable[[DatasetItem], bool]:
+    """
+    Create a predicate to filter out empty articles.
+
+    Keeps only articles with a word count greater than 0.
+
+    :return: Predicate callable.
+    :rtype: Callable[[DatasetItem], bool]
+    """
+    from sulku.utils import count_words
+
+    return lambda item: count_words(item.content) > 0
+
+
+def language_filter(
+    languages: Union[str, list[str], set[str], Sequence[str]],
+) -> Callable[[DatasetItem], bool]:
+    """
+    Create a predicate to filter articles by language.
+
+    Keeps only articles that match the allowed language(s).
+
+    :param languages: A single language string or a collection of allowed languages.
+    :type languages: Union[str, list[str], set[str], Sequence[str]]
+    :return: Predicate callable.
+    :rtype: Callable[[DatasetItem], bool]
+    """
+    if isinstance(languages, str):
+        allowed = {languages.lower().strip()}
+    else:
+        allowed = {lang.lower().strip() for lang in languages}
+
+    def predicate(item: DatasetItem) -> bool:
+        metadata = item.metadata
+        lang_val = metadata.get("language") or metadata.get("lang")
+        if not lang_val or not isinstance(lang_val, str):
+            return False
+        return lang_val.lower().strip() in allowed
+
+    return predicate

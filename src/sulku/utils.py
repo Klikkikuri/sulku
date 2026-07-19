@@ -71,7 +71,9 @@ def strip_markdown(text: str | None) -> str:
     text = re.sub(r"^[ \t]*\d+\.[ \t]+", "", text, flags=re.MULTILINE)
 
     # 13. Remove horizontal rules
-    text = re.sub(r"^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$", "", text, flags=re.MULTILINE)
+    text = re.sub(
+        r"^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$", "", text, flags=re.MULTILINE
+    )
 
     # Replace pipes (tables) and backslashes (escaping)
     text = text.replace("|", " ")

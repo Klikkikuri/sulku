@@ -1,11 +1,13 @@
 from fastapi import FastAPI
 from fastapi.concurrency import asynccontextmanager
+
 # import fasttext
 from sulku.wpapi import wpapi_router
 
 
 # Global dictionary to hold pre-loaded models in memory
 models = {}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,7 +24,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="AI Text Classifier Service", lifespan=lifespan)
-    
+
     @app.get("/health")
     async def health_check():
         return {"status": "healthy"}

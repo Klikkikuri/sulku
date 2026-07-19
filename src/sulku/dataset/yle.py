@@ -24,7 +24,9 @@ import argparse
 import gettext
 
 # Setup logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Default block types suitable for AI training (excluding audio, video, dynamic embeds, etc.)
@@ -37,7 +39,7 @@ DEFAULT_ALLOWED_TYPES = {
     "table",
     "interactive-table",
     "aside",
-    "feature"
+    "feature",
 }
 
 # Translation catalogs for Yle news languages (Finnish, Swedish, English)
@@ -64,7 +66,7 @@ TRANSLATIONS = {
         "youtube": "YouTube",
         "Image": "Kuva",
         "Caption": "Kuvateksti",
-        "Link": "Linkki"
+        "Link": "Linkki",
     },
     "sv": {
         "Gallery": "Galleri",
@@ -88,8 +90,8 @@ TRANSLATIONS = {
         "youtube": "YouTube",
         "Image": "Bild",
         "Caption": "Bildtext",
-        "Link": "Länk"
-    }
+        "Link": "Länk",
+    },
 }
 
 
@@ -97,6 +99,7 @@ class DictTranslations(gettext.NullTranslations):
     """
     In-memory catalog translations class compatible with standard Python gettext.
     """
+
     def __init__(self, catalog: dict):
         super().__init__()
         self._catalog = catalog
@@ -131,10 +134,7 @@ def get_translator(lang: str) -> gettext.NullTranslations:
 
 
 def block_to_markdown(
-    block: dict,
-    allowed_types: set[str] = None,
-    exclude_types: set[str] = None,
-    _ = None
+    block: dict, allowed_types: set[str] = None, exclude_types: set[str] = None, _=None
 ) -> str:
     """
     Convert a content block dictionary to a markdown string.
@@ -163,6 +163,7 @@ def block_to_markdown(
         return ""
 
     if _ is None:
+
         def _(x):
             return x
 
@@ -193,7 +194,7 @@ def block_to_markdown(
             if b_type == "bullet-list":
                 res.append(f"- {item_text}")
             else:
-                res.append(f"{i+1}. {item_text}")
+                res.append(f"{i + 1}. {item_text}")
         return "\n".join(res)
 
     elif b_type in ("table", "interactive-table") and "rows" in block:
@@ -207,14 +208,19 @@ def block_to_markdown(
                 max_cols = len(cells)
         if max_cols == 0:
             return ""
-        
+
         md_lines = []
+
         def get_row_cells(row_dict):
             cells = row_dict.get("cells", []) if isinstance(row_dict, dict) else []
             cell_texts = []
             for j in range(max_cols):
                 if j < len(cells):
-                    cell_val = cells[j].get("text", "") if isinstance(cells[j], dict) else str(cells[j])
+                    cell_val = (
+                        cells[j].get("text", "")
+                        if isinstance(cells[j], dict)
+                        else str(cells[j])
+                    )
                     cell_texts.append(cell_val.replace("\n", " ").strip())
                 else:
                     cell_texts.append("")
@@ -233,7 +239,7 @@ def block_to_markdown(
         fmt = block.get("recommendedFormat") or "jpg"
         caption = block.get("caption") or ""
         source = block.get("source") or ""
-        
+
         img_str = f"![{alt}]({img_id}.{fmt})"
         if caption:
             caption_lbl = _("Caption")
@@ -259,7 +265,9 @@ def block_to_markdown(
         content = block.get("content", [])
         if not content:
             return ""
-        rendered_blocks = [block_to_markdown(b, allowed_types, exclude_types, _) for b in content if b]
+        rendered_blocks = [
+            block_to_markdown(b, allowed_types, exclude_types, _) for b in content if b
+        ]
         combined = "\n\n".join(b for b in rendered_blocks if b)
         lines = combined.split("\n")
         return "\n".join(f"> {line}" for line in lines)
@@ -272,9 +280,13 @@ def block_to_markdown(
         for i, page in enumerate(pages):
             page_content = page.get("content", []) if isinstance(page, dict) else []
             if page_content:
-                rendered_blocks = [block_to_markdown(b, allowed_types, exclude_types, _) for b in page_content if b]
+                rendered_blocks = [
+                    block_to_markdown(b, allowed_types, exclude_types, _)
+                    for b in page_content
+                    if b
+                ]
                 combined = "\n\n".join(b for b in rendered_blocks if b)
-                res.append(f"### {_('Feature Page')} {i+1}\n\n{combined}")
+                res.append(f"### {_('Feature Page')} {i + 1}\n\n{combined}")
         return "\n\n".join(res)
 
     elif b_type == "links":
@@ -333,7 +345,9 @@ def block_to_markdown(
         s_id = block.get("surveyId") or ""
         alt = block.get("alt") or ""
         survey_lbl = _("Survey")
-        return f"*📊 {survey_lbl} {s_id}*: {alt}" if alt else f"*📊 {survey_lbl} {s_id}*"
+        return (
+            f"*📊 {survey_lbl} {s_id}*: {alt}" if alt else f"*📊 {survey_lbl} {s_id}*"
+        )
 
     elif b_type == "external-content":
         html = block.get("html") or ""
@@ -346,7 +360,9 @@ def block_to_markdown(
         info_id = block.get("infogramId") or ""
         alt = block.get("alt") or ""
         info_lbl = _("Infogram")
-        return f"*📊 {info_lbl} {info_id}*: {alt}" if alt else f"*📊 {info_lbl} {info_id}*"
+        return (
+            f"*📊 {info_lbl} {info_id}*: {alt}" if alt else f"*📊 {info_lbl} {info_id}*"
+        )
 
     elif b_type == "tehtava-exam":
         exam_id = block.get("id") or ""
@@ -360,7 +376,9 @@ def block_to_markdown(
         table_id = block.get("tableId") or ""
         alt = block.get("alt") or ""
         tbl_lbl = _("Interactive Table")
-        return f"*📊 {tbl_lbl} {table_id}*: {alt}" if alt else f"*📊 {tbl_lbl} {table_id}*"
+        return (
+            f"*📊 {tbl_lbl} {table_id}*: {alt}" if alt else f"*📊 {tbl_lbl} {table_id}*"
+        )
 
     elif b_type == "flockler":
         stream_id = block.get("streamId") or ""
@@ -383,12 +401,12 @@ def format_front_matter(article: dict) -> str:
     :rtype: str
     """
     lines = ["---"]
-    
+
     # ID
     art_id = article.get("id")
     if art_id:
         lines.append(f"id: {art_id}")
-        
+
     # Title
     headline = article.get("headline")
     title = ""
@@ -399,7 +417,7 @@ def format_front_matter(article: dict) -> str:
     if title:
         safe_title = title.replace('"', '\\"')
         lines.append(f'title: "{safe_title}"')
-        
+
     # URL
     url_dict = article.get("url")
     url = ""
@@ -409,21 +427,21 @@ def format_front_matter(article: dict) -> str:
         url = url_dict
     if url:
         lines.append(f"url: {url}")
-        
+
     # Dates
     date_pub = article.get("datePublished")
     if date_pub:
         lines.append(f"datePublished: {date_pub}")
-        
+
     date_mod = article.get("dateContentModified") or article.get("dateJsonModified")
     if date_mod:
         lines.append(f"dateModified: {date_mod}")
-        
+
     # Language
     lang = article.get("language")
     if lang:
         lines.append(f"language: {lang}")
-        
+
     # Authors
     authors = article.get("authors")
     if authors and isinstance(authors, list):
@@ -440,7 +458,7 @@ def format_front_matter(article: dict) -> str:
                         lines.append(f"  - name: {name}")
             elif isinstance(auth, str):
                 lines.append(f"  - name: {auth}")
-                
+
     # Subjects/Tags
     subjects = article.get("subjects")
     if subjects and isinstance(subjects, list):
@@ -450,7 +468,12 @@ def format_front_matter(article: dict) -> str:
                 title_dict = sub.get("title")
                 title_val = ""
                 if isinstance(title_dict, dict):
-                    title_val = title_dict.get("fi") or title_dict.get("en") or title_dict.get("sv") or ""
+                    title_val = (
+                        title_dict.get("fi")
+                        or title_dict.get("en")
+                        or title_dict.get("sv")
+                        or ""
+                    )
                 elif isinstance(title_dict, str):
                     title_val = title_dict
                 if title_val:
@@ -459,15 +482,13 @@ def format_front_matter(article: dict) -> str:
             elif isinstance(sub, str):
                 safe_val = sub.replace('"', '\\"')
                 lines.append(f'  - "{safe_val}"')
-                
+
     lines.append("---")
     return "\n".join(lines)
 
 
 def article_to_markdown(
-    article: dict,
-    allowed_types: set[str] = None,
-    exclude_types: set[str] = None
+    article: dict, allowed_types: set[str] = None, exclude_types: set[str] = None
 ) -> str:
     """
     Render a complete Yle article dictionary to its Markdown representation.
@@ -486,36 +507,39 @@ def article_to_markdown(
     _ = translator.gettext
 
     front_matter = format_front_matter(article)
-    
+
     body_parts = []
-    
+
     # Check if the title is already present as a heading at the start of body content
     content_blocks = article.get("content", [])
     has_title_in_content = False
-    
+
     headline_dict = article.get("headline")
     title = ""
     if isinstance(headline_dict, dict):
         title = headline_dict.get("full") or ""
     elif isinstance(headline_dict, str):
         title = headline_dict
-        
+
     for block in content_blocks[:2]:
-        if block.get("type") == "heading" and block.get("text", "").strip() == title.strip():
+        if (
+            block.get("type") == "heading"
+            and block.get("text", "").strip() == title.strip()
+        ):
             has_title_in_content = True
             break
-            
+
     if not has_title_in_content and title:
         body_parts.append(f"# {title}")
-        
+
     # Convert all content blocks in sequence
     for block in content_blocks:
         md = block_to_markdown(block, allowed_types, exclude_types, _)
         if md:
             body_parts.append(md)
-            
+
     body_content = "\n\n".join(body_parts)
-    
+
     return f"{front_matter}\n\n{body_content}\n"
 
 
@@ -524,7 +548,7 @@ def process_single_json(
     src_dir: Path,
     dest_dir: Path,
     allowed_types: set[str] = None,
-    exclude_types: set[str] = None
+    exclude_types: set[str] = None,
 ) -> int:
     """
     Process a single Yle news JSON file and write markdown files for each article.
@@ -571,11 +595,11 @@ def process_single_json(
         art_id = article.get("id")
         if not art_id:
             continue
-        
+
         safe_id = "".join(c for c in str(art_id) if c.isalnum() or c in ("-", "_"))
         if not safe_id:
             continue
-            
+
         dest_file = target_dir / f"{safe_id}.md"
         try:
             md_content = article_to_markdown(article, allowed_types, exclude_types)
@@ -583,7 +607,9 @@ def process_single_json(
                 out_f.write(md_content)
             count += 1
         except Exception as e:
-            logger.error(f"Failed to write article {art_id} from {json_path} to {dest_file}: {e}")
+            logger.error(
+                f"Failed to write article {art_id} from {json_path} to {dest_file}: {e}"
+            )
 
     return count
 
@@ -593,7 +619,7 @@ def convert_dataset(
     dest_dir: Path,
     max_workers: int = None,
     allowed_types: set[str] = None,
-    exclude_types: set[str] = None
+    exclude_types: set[str] = None,
 ) -> int:
     """
     Recursively find all JSON files under src_dir and convert them to Markdown.
@@ -651,7 +677,7 @@ def convert_dataset(
                 src_root,
                 dest_dir,
                 allowed_types,
-                exclude_types
+                exclude_types,
             ): jf
             for jf in json_files
         }
@@ -684,42 +710,42 @@ def main() -> None:
         "--src",
         type=str,
         required=True,
-        help="Path to the source data folder containing Yle news JSON files."
+        help="Path to the source data folder containing Yle news JSON files.",
     )
     parser.add_argument(
         "--dest",
         type=str,
         required=True,
-        help="Path to the destination folder for generated markdown files."
+        help="Path to the destination folder for generated markdown files.",
     )
     parser.add_argument(
         "--workers",
         type=int,
         default=None,
-        help="Maximum number of parallel workers. Defaults to CPU count."
+        help="Maximum number of parallel workers. Defaults to CPU count.",
     )
     parser.add_argument(
         "--exclude-types",
         type=str,
         default=None,
-        help="Comma-separated list of Yle block types to exclude (e.g. video,audio,some-posting)"
+        help="Comma-separated list of Yle block types to exclude (e.g. video,audio,some-posting)",
     )
     parser.add_argument(
         "--include-types",
         type=str,
         default=None,
-        help="Comma-separated list of Yle block types to exclusively include. Use 'all' or '*' to include everything."
+        help="Comma-separated list of Yle block types to exclusively include. Use 'all' or '*' to include everything.",
     )
 
     args = parser.parse_args()
-    
+
     src_path = Path(args.src)
     dest_path = Path(args.dest)
-    
+
     if not src_path.exists():
         logger.error(f"Source path does not exist: {src_path}")
         sys.exit(1)
-        
+
     exclude_types = None
     if args.exclude_types:
         exclude_types = {t.strip() for t in args.exclude_types.split(",") if t.strip()}
@@ -730,14 +756,16 @@ def main() -> None:
         if val in ("all", "*"):
             allowed_types = {"*"}
         else:
-            allowed_types = {t.strip() for t in args.include_types.split(",") if t.strip()}
-        
+            allowed_types = {
+                t.strip() for t in args.include_types.split(",") if t.strip()
+            }
+
     convert_dataset(
         src_path,
         dest_path,
         max_workers=args.workers,
         allowed_types=allowed_types,
-        exclude_types=exclude_types
+        exclude_types=exclude_types,
     )
 
 

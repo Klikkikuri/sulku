@@ -7,6 +7,8 @@ Tests the Click CLI command 'sample' under various usage patterns.
 
 from pathlib import Path
 import tempfile
+import logging
+from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 import pytest
 from sulku.cli import main
@@ -53,3 +55,162 @@ def test_cli_sample_no_matching_files(temp_dataset):
 
     assert result.exit_code != 0
     assert "Error: No files found matching pattern" in result.output
+
+
+def test_cli_sample_with_filtering():
+    """Test sampling with language and word count filters."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+
+        # art1: fi, 60 words
+        art1 = tmp_path / "art1.md"
+        art1.write_text(
+            "---\nlanguage: fi\n---\n" + " ".join(["sana"] * 60), encoding="utf-8"
+        )
+
+        # art2: sv, 120 words
+        art2 = tmp_path / "art2.md"
+        art2.write_text(
+            "---\nlang: sv\n---\n" + " ".join(["ord"] * 120), encoding="utf-8"
+        )
+
+        # art3: fi, 5 words
+        art3 = tmp_path / "art3.md"
+        art3.write_text(
+            "---\nlanguage: fi\n---\n" + " ".join(["sana"] * 5), encoding="utf-8"
+        )
+
+        runner = CliRunner()
+
+        # 1. Filter by language 'sv'
+        result = runner.invoke(main, ["sample", str(tmp_path), "-n", "1", "-l", "sv"])
+        assert result.exit_code == 0
+        paths = result.output.strip().splitlines()
+        assert len(paths) == 1
+        assert Path(paths[0]).name == "art2.md"
+
+        # 2. Filter by language 'fi' and min-words 50
+        result = runner.invoke(
+            main, ["sample", str(tmp_path), "-n", "1", "-l", "fi", "-mw", "50"]
+        )
+        assert result.exit_code == 0
+        paths = result.output.strip().splitlines()
+        assert len(paths) == 1
+        assert Path(paths[0]).name == "art1.md"
+
+        # 3. Filter with options that match no files
+        result = runner.invoke(main, ["sample", str(tmp_path), "-n", "1", "-l", "en"])
+        assert result.exit_code != 0
+        assert "Error: No files found matching pattern" in result.output
+
+
+@patch("sulku.cli.SyntheticDatasetGenerator")
+def test_cli_generate_synthetic_success(mock_generator_class):
+    """Test successful CLI execution for generate-synthetic command."""
+    mock_generator = MagicMock()
+    mock_generator.generate.return_value = [
+        Path("/dummy/out1.md"),
+        Path("/dummy/out2.md"),
+    ]
+    mock_generator_class.return_value = mock_generator
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["generate-synthetic", tmpdir, "-n", "2", "-m", "test-model", "-s", "100"],
+        )
+
+        assert result.exit_code == 0
+        assert (
+            "Sampling 2 articles and generating synthetic articles using model 'test-model'..."
+            in result.output
+        )
+        assert "Successfully generated 2 synthetic articles:" in result.output
+        assert "- /dummy/out1.md" in result.output
+        assert "- /dummy/out2.md" in result.output
+
+        mock_generator_class.assert_called_once_with(
+            source_dir=Path(tmpdir), model_name="test-model"
+        )
+        mock_generator.generate.assert_called_once_with(
+            n_samples=2, seed=100, dest_dir=None
+        )
+
+
+@patch("logging.basicConfig")
+def test_cli_logging_default(mock_basic_config, temp_dataset):
+    """Test that default CLI invocation configures logging with INFO level."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["sample", str(temp_dataset), "-n", "1"])
+    assert result.exit_code == 0
+    assert mock_basic_config.call_count == 1
+    kwargs = mock_basic_config.call_args[1]
+    assert kwargs["level"] == logging.INFO
+    assert kwargs["force"] is True
+    assert len(kwargs["handlers"]) == 1
+    assert kwargs["handlers"][0].formatter.show_extra is False
+
+
+@patch("logging.basicConfig")
+def test_cli_logging_debug_shorthand(mock_basic_config, temp_dataset):
+    """Test that --debug option configures logging with DEBUG level."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["--debug", "sample", str(temp_dataset), "-n", "1"])
+    assert result.exit_code == 0
+    assert mock_basic_config.call_count == 1
+    kwargs = mock_basic_config.call_args[1]
+    assert kwargs["level"] == logging.DEBUG
+    assert kwargs["force"] is True
+    assert len(kwargs["handlers"]) == 1
+    assert kwargs["handlers"][0].formatter.show_extra is True
+
+
+@patch("logging.basicConfig")
+def test_cli_logging_custom_level(mock_basic_config, temp_dataset):
+    """Test that --log-level option configures logging with the requested level."""
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["--log-level", "ERROR", "sample", str(temp_dataset), "-n", "1"]
+    )
+    assert result.exit_code == 0
+    assert mock_basic_config.call_count == 1
+    kwargs = mock_basic_config.call_args[1]
+    assert kwargs["level"] == logging.ERROR
+    assert kwargs["force"] is True
+    assert len(kwargs["handlers"]) == 1
+    assert kwargs["handlers"][0].formatter.show_extra is False
+
+
+def test_extra_formatter():
+    """Test the custom ExtraFormatter formatting with/without show_extra."""
+    from sulku.cli import ExtraFormatter
+
+    record = logging.LogRecord(
+        name="test_logger",
+        level=logging.DEBUG,
+        pathname="test.py",
+        lineno=10,
+        msg="A simple log message",
+        args=(),
+        exc_info=None,
+    )
+    # Add some extra attributes
+    record.token_usage = {"prompt_tokens": 10, "completion_tokens": 20}
+    record.simple_extra = "hello"
+
+    # 1. Formatting with show_extra=False
+    formatter_no_extra = ExtraFormatter(fmt="%(message)s", show_extra=False)
+    output_no_extra = formatter_no_extra.format(record)
+    assert output_no_extra == "A simple log message"
+
+    # 2. Formatting with show_extra=True
+    formatter_with_extra = ExtraFormatter(fmt="%(message)s", show_extra=True)
+    output_with_extra = formatter_with_extra.format(record)
+
+    # Check that extra attributes are vertically formatted and indented
+    assert "A simple log message" in output_with_extra
+    assert "simple_extra: hello" in output_with_extra
+    assert "token_usage:" in output_with_extra
+    assert "    completion_tokens: 20" in output_with_extra
+    assert "    prompt_tokens: 10" in output_with_extra

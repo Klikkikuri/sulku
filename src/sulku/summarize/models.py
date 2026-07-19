@@ -5,6 +5,7 @@ class StyleVector(BaseModel):
     """
     The style axis dictates the mechanical and linguistic construction of an article, focusing on elements like vocabulary complexity, sentence length, and syntax. Writers calibrate this axis to control the piece's readability and aesthetic rhythm, ensuring the language practically supports the chosen tone and aligns with the target audience's comprehension level.
     """
+
     model_config = ConfigDict(use_attribute_docstrings=True)
 
     tone: str
@@ -95,35 +96,50 @@ class StyleVector(BaseModel):
      - Advertisements & Sponsored Content – Paid content that is designed to look like editorial content.
      - Announcements & Notices – Brief, highly formatted bulletins—such as wedding announcements, real estate transfers, public hearing dates, or basic obituaries.
      - Letters to the Editor – A reader-submitted response to a previously published piece. These are typically short, opinionated, and highly reactive.
+     - Live Blog / Live Feed – A rolling stream of updates on a developing, ongoing event.
     """
 
-class ArticleSummary(BaseModel):
 
+class ArticleSummary(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    headline: str = Field(..., description="The headline of the article.",
+    headline: str = Field(
+        ...,
+        description="The headline of the article.",
         examples=[
             "The association, which received millions in subsidies, kept the accounts by hand and paid wages in cash – Stea reported to the police",
             "In Outokumpu, a way to root out urban seagull problems was found – the restoration of islets attracts birds back to the lake",
-            "Tapio Tiainen built a giant sailboat for 14 years: “I don’t even want to say how much money has gone”"
-        ])
-    summary: list[str] = Field(..., description="A list of summary sentences for the article.",  examples=[
-        [
-            "Stea will charge back approximately 455 000 euros from KRIS-Oulu ry. The association helped people with criminal background, but misused the aid.",
-            "A request for investigation has been made to the police.",
-            "The former executive director of the association denies the abuses.",
-            "The association has been filed for bankruptcy. The government is unlikely to get its money back."
+            "Tapio Tiainen built a giant sailboat for 14 years: “I don’t even want to say how much money has gone”",
+            "Löylyyn vai lenkille? Molemmista saa samat hyödyt, kertoo uusi Jyväskylän yliopiston tutkimus",
         ],
-        [
-            "The gull islets restored in Sysmäjärvi in Outokumpu help seagulls and declining waterfowl species.",
-            "Metsähallitus removed vegetation from the islets. The seagulls came back and the waterfowl followed.",
-            "Waterfowl take shelter in the seagulls. Gulls effectively expel predators.",
-            "Rehabilitation could attract seagulls from cities back to the lakes."
+    )
+    summary: list[str] = Field(
+        ...,
+        description="A list of summary sentences for the article.",
+        examples=[
+            [
+                "Stea will charge back approximately 455 000 euros from KRIS-Oulu ry. The association helped people with criminal background, but misused the aid.",
+                "A request for investigation has been made to the police.",
+                "The former executive director of the association denies the abuses.",
+                "The association has been filed for bankruptcy. The government is unlikely to get its money back.",
+            ],
+            [
+                "The gull islets restored in Sysmäjärvi in Outokumpu help seagulls and declining waterfowl species.",
+                "Metsähallitus removed vegetation from the islets. The seagulls came back and the waterfowl followed.",
+                "Waterfowl take shelter in the seagulls. Gulls effectively expel predators.",
+                "Rehabilitation could attract seagulls from cities back to the lakes.",
+            ],
+            [
+                "Tapio Tiainen from Korpilahti has been building a sailboat for 14 years. The boat was transported to Loviisa harbour on Friday.",
+                "The boat is almost 16 meters long, five meters wide and weighs 30 tons. It is reportedly the largest sailboat built in Central Finland.",
+                "Tiainen goes sailing with her friend to the world right after the summer. The first is Portugal.",
+            ],
+            [
+                "Jyväskylän yliopiston tutkimus osoittaa, että saunan ilmankosteus nostaa sykettä ja kehon lämpötilaa.",
+                "Löydös on merkittävä, sillä aiemmissa saunatutkimuksissa ilmankosteutta ei ole mitattu tarkasti.",
+                "Terveyshyötyjä voi saada matalammilla lämpötiloilla, jos ilmankosteus on korkeampi.",
+                "Kostealla iholla hiki ei haihdu. Saunominen vaikuttaa sydämeen samalla tavalla kuin reipas kävely.",
+            ],
         ],
-        [
-            "Tapio Tiainen from Korpilahti has been building a sailboat for 14 years. The boat was transported to Loviisa harbour on Friday.",
-            "The boat is almost 16 meters long, five meters wide and weighs 30 tons. It is reportedly the largest sailboat built in Central Finland.",
-            "Tiainen goes sailing with her friend to the world right after the summer. The first is Portugal."
-        ]
-    ])
+    )
     style: StyleVector = Field(..., description="The style vector of the article.")

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
-    { name = "Teemu Autto", email = "teemu@rautakuu.org" }
+    { name = "Teemu Autto", email = "klikkikuri@teemu.rautakuu.org" }
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
     "fasttext>=0.9.3",
     "jinja2>=3.1.6",
     "openai>=2.46.0",
+    "platformdirs>=4.10.1",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3",

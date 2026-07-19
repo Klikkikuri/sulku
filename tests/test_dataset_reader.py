@@ -29,7 +29,7 @@ def temp_dataset_dir():
         file1.write_text(
             "---\n"
             "id: yle-1\n"
-            "title: \"Yle News Item 1\"\n"
+            'title: "Yle News Item 1"\n'
             "authors:\n"
             "  - name: Author A\n"
             "    organization: Yle\n"
@@ -39,7 +39,7 @@ def temp_dataset_dir():
             "---\n"
             "Body content of article 1 starts here.\n"
             "This is the actual text.",
-            encoding="utf-8"
+            encoding="utf-8",
         )
 
         # File 2: Simple text file (no front matter)
@@ -51,7 +51,7 @@ def temp_dataset_dir():
         json_data = {
             "id": "yle-3",
             "title": "JSON Article",
-            "content": "This is JSON text content."
+            "content": "This is JSON text content.",
         }
         file3.write_text(json.dumps(json_data), encoding="utf-8")
 
@@ -60,12 +60,8 @@ def temp_dataset_dir():
         nested_dir.mkdir(parents=True, exist_ok=True)
         file4 = nested_dir / "article_4.md"
         file4.write_text(
-            "---\n"
-            "id: nested-4\n"
-            "title: Nested Item\n"
-            "---\n"
-            "Nested body text.",
-            encoding="utf-8"
+            "---\nid: nested-4\ntitle: Nested Item\n---\nNested body text.",
+            encoding="utf-8",
         )
 
         yield tmp_path
@@ -103,6 +99,7 @@ def test_pattern_filtering(temp_dataset_dir):
 
 def test_custom_filtering(temp_dataset_dir):
     """Test custom filtering function."""
+
     def filter_no_txt(path: Path) -> bool:
         return path.suffix != ".txt"
 
@@ -117,7 +114,7 @@ def test_sequence_operations(temp_dataset_dir):
     ds = FileDataset(temp_dataset_dir, pattern="*", recursive=False)
     # Total 3 files in main dir. Let's index them.
     assert isinstance(ds[0], DatasetItem)
-    
+
     # Slicing
     sliced = ds[0:2]
     assert isinstance(sliced, list)
@@ -134,7 +131,9 @@ def test_content_lazy_loading_and_front_matter(temp_dataset_dir):
     """Test that text content is lazy loaded and front matter is skipped when requested."""
     # File 1: Has front matter
     item1 = DatasetItem(temp_dataset_dir / "article_1.md")
-    expected_content = "Body content of article 1 starts here.\nThis is the actual text."
+    expected_content = (
+        "Body content of article 1 starts here.\nThis is the actual text."
+    )
     assert item1.content == expected_content
     # __str__ should match content
     assert str(item1) == expected_content
@@ -178,7 +177,7 @@ def test_json_metadata_loader(temp_dataset_dir):
 def test_sampling(temp_dataset_dir):
     """Test random sampling from dataset."""
     ds = FileDataset(temp_dataset_dir, pattern="*")
-    
+
     # Check basic sampling
     sampled = ds.sample(2)
     assert len(sampled) == 2
@@ -207,3 +206,66 @@ def test_extend_with_metadata_loader(temp_dataset_dir):
 
     # Original dataset remains unchanged and still has metadata
     assert ds[0].metadata != {}
+
+
+def test_dataset_filtering_logic(tmp_path):
+    """Test language_filter, min_words_filter, non_empty_filter, and chaining filters."""
+    # Create article 1: FI, 60 words
+    art1 = tmp_path / "art1.md"
+    art1.write_text(
+        "---\nlanguage: fi\n---\n" + " ".join(["sana"] * 60), encoding="utf-8"
+    )
+
+    # Create article 2: SV, 120 words
+    art2 = tmp_path / "art2.md"
+    art2.write_text("---\nlang: sv\n---\n" + " ".join(["ord"] * 120), encoding="utf-8")
+
+    # Create article 3: FI, 5 words (stub)
+    art3 = tmp_path / "art3.md"
+    art3.write_text(
+        "---\nlanguage: FI\n---\nJotain pientä tekstiä vain tässä.", encoding="utf-8"
+    )
+
+    # Create article 4: Empty (0 words)
+    art4 = tmp_path / "art4.md"
+    art4.write_text("---\nlanguage: fi\n---\n", encoding="utf-8")
+
+    ds = FileDataset(tmp_path, pattern="*.md")
+    assert len(ds) == 4
+
+    # Test language filtering: keep fi
+    from sulku.dataset.reader import language_filter, min_words_filter, non_empty_filter
+
+    fi_ds = ds.filter(language_filter("fi"))
+    # Should keep art1, art3, art4
+    assert len(fi_ds) == 3
+    names = {item.path.name for item in fi_ds}
+    assert names == {"art1.md", "art3.md", "art4.md"}
+
+    # Test language filtering with collection: keep [fi, sv]
+    fi_sv_ds = ds.filter(language_filter(["fi", "sv"]))
+    assert len(fi_sv_ds) == 4
+
+    # Test min_words_filter: keep >= 50 words
+    long_ds = ds.filter(min_words_filter(50))
+    # Should keep art1 (60) and art2 (120)
+    assert len(long_ds) == 2
+    names = {item.path.name for item in long_ds}
+    assert names == {"art1.md", "art2.md"}
+
+    # Test non_empty_filter: keep > 0 words
+    non_empty_ds = ds.filter(non_empty_filter())
+    # Should keep art1, art2, art3 (art4 is empty)
+    assert len(non_empty_ds) == 3
+    names = {item.path.name for item in non_empty_ds}
+    assert names == {"art1.md", "art2.md", "art3.md"}
+
+    # Chain filters: FI language and not empty and >= 50 words
+    chained_ds = (
+        ds.filter(language_filter("fi"))
+        .filter(non_empty_filter())
+        .filter(min_words_filter(50))
+    )
+    # Should keep only art1
+    assert len(chained_ds) == 1
+    assert chained_ds[0].path.name == "art1.md"
