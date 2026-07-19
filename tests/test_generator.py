@@ -232,3 +232,45 @@ def test_generate_workflow(
         assert "prompt_tokens: 100" in content
         assert "completion_tokens: 50" in content
         assert "total_tokens: 150" in content
+
+
+@patch("sulku.dataset.generator.create_synthetic_article")
+@patch("sulku.dataset.generator.summarize_text")
+def test_generate_skip_existing(
+    mock_summarize,
+    mock_create_synthetic,
+    dummy_dataset_dir,
+    dummy_cache_dir,
+    dummy_dest_dir,
+    mock_summary,
+):
+    """Test that existing synthetic articles are skipped unless force=True."""
+    generator = SyntheticDatasetGenerator(
+        source_dir=dummy_dataset_dir, model_name="test-model", cache_dir=dummy_cache_dir
+    )
+
+    mock_summarize.return_value = mock_summary
+    mock_create_synthetic.return_value = "Tämä on tekoälyn luoma synteettinen artikkeli."
+
+    # First run: generates 2 articles
+    generated_paths = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir)
+    assert len(generated_paths) == 2
+    assert mock_summarize.call_count == 2
+    assert mock_create_synthetic.call_count == 2
+
+    # Reset mock call counts
+    mock_summarize.reset_mock()
+    mock_create_synthetic.reset_mock()
+
+    # Second run with force=False: should skip both since they already exist
+    generated_paths_second = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir, force=False)
+    assert len(generated_paths_second) == 0
+    assert mock_summarize.call_count == 0
+    assert mock_create_synthetic.call_count == 0
+
+    # Third run with force=True: should regenerate both (calling LLM generator, but summary is cached)
+    generated_paths_third = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir, force=True)
+    assert len(generated_paths_third) == 2
+    assert mock_summarize.call_count == 0
+    assert mock_create_synthetic.call_count == 2
+

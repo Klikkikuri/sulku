@@ -22,7 +22,9 @@ Your task is to take the provided telegraphic text and extract the key informati
 Rules:
     1. Do not add any new facts, names, or numbers that are not present in the input.
     2. Add only the necessary grammar, syntax, and connective tissue (prepositions, articles) to make it readable.
-    3. Output ONLY the reconstructed structure.
+    3. Collect 5 to 10 key details and summarize them in a concise manner.
+    4. Output ONLY the reconstructed structure.
+
 """
 
 ARTICLE_CONTEXT = r"""

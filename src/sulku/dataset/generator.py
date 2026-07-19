@@ -194,6 +194,7 @@ class SyntheticDatasetGenerator:
         n_samples: int,
         seed: Optional[int] = None,
         dest_dir: Optional[Union[str, Path]] = None,
+        force: bool = False,
     ) -> list[Path]:
         """
         Generate a synthetic dataset from sampled articles.
@@ -207,6 +208,8 @@ class SyntheticDatasetGenerator:
         :type seed: int, optional
         :param dest_dir: Destination directory. Defaults to `/app/data/genai/{model_name}`.
         :type dest_dir: Union[str, Path], optional
+        :param force: Force generation even if synthetic data already exists.
+        :type force: bool
         :return: List of generated synthetic article file paths.
         :rtype: list[Path]
         """
@@ -231,6 +234,14 @@ class SyntheticDatasetGenerator:
         generated_paths = []
 
         for article in sampled_items:
+            # Check if synthetic file already exists
+            rel_path = article.path.relative_to(self.source_dir)
+            out_file = dest_path / rel_path
+
+            if out_file.exists() and not force:
+                logger.info("Skipping already generated synthetic article: %s", out_file)
+                continue
+
             # 1. Fetch or create summary (cached)
             summary = self.get_or_create_summary(article)
 
@@ -270,8 +281,6 @@ class SyntheticDatasetGenerator:
                 full_text = f"{synthetic_content}\n"
 
             # 4. Mirror the path structure in destination directory
-            rel_path = article.path.relative_to(self.source_dir)
-            out_file = dest_path / rel_path
             out_file.parent.mkdir(parents=True, exist_ok=True)
 
             # 5. Write the synthetic article to file

@@ -134,7 +134,29 @@ def test_cli_generate_synthetic_success(mock_generator_class):
             source_dir=Path(tmpdir), model_name="test-model"
         )
         mock_generator.generate.assert_called_once_with(
-            n_samples=2, seed=100, dest_dir=None
+            n_samples=2, seed=100, dest_dir=None, force=False
+        )
+
+
+@patch("sulku.cli.SyntheticDatasetGenerator")
+def test_cli_generate_synthetic_force(mock_generator_class):
+    """Test CLI execution for generate-synthetic command with --force flag."""
+    mock_generator = MagicMock()
+    mock_generator.generate.return_value = [
+        Path("/dummy/out1.md"),
+    ]
+    mock_generator_class.return_value = mock_generator
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["generate-synthetic", tmpdir, "-n", "1", "-m", "test-model", "--force"],
+        )
+
+        assert result.exit_code == 0
+        mock_generator.generate.assert_called_once_with(
+            n_samples=1, seed=None, dest_dir=None, force=True
         )
 
 
@@ -214,3 +236,31 @@ def test_extra_formatter():
     assert "token_usage:" in output_with_extra
     assert "    completion_tokens: 20" in output_with_extra
     assert "    prompt_tokens: 10" in output_with_extra
+
+
+def test_cli_generate_fasttext(temp_dataset):
+    """Test generating FastText training data using the CLI command."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_file = Path(tmpdir) / "fasttext.txt"
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "generate-fasttext",
+                str(temp_dataset),
+                "-o",
+                str(output_file),
+                "-l",
+                "human",
+                "-mw",
+                "1",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Successfully wrote FastText sentence data to" in result.output
+        assert output_file.exists()
+        lines = output_file.read_text(encoding="utf-8").splitlines()
+        assert len(lines) > 0
+        assert all(line.startswith("__label__human ") for line in lines)
+

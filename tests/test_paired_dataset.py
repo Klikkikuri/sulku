@@ -12,7 +12,7 @@ import tempfile
 from unittest.mock import patch
 import pytest
 
-from sulku.dataset.paired import ItemPair, PairedDataset, load_paired_dataset
+from sulku.dataset.paired import ItemPair, PairedDataset, load_paired_dataset, generate_fasttext_sentence_data
 from sulku.dataset.reader import DatasetItem
 
 
@@ -152,3 +152,34 @@ def test_invalid_directories():
     """Test that FileNotFoundError is raised when directories do not exist."""
     with pytest.raises(FileNotFoundError):
         load_paired_dataset(path_or_model_name="/nonexistent/model", source_dir="/nonexistent/source")
+
+
+def test_generate_fasttext_sentence_data():
+    """Test generating FastText training data from dataset items."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        out_file = Path(tmp_dir) / "fasttext_data.txt"
+
+        item1_path = Path(tmp_dir) / "item1.md"
+        item1_path.write_text("Tämä on ensimmäinen lause. Tämä on toinen lause.", encoding="utf-8")
+        item1 = DatasetItem(item1_path)
+
+        item2_path = Path(tmp_dir) / "item2.md"
+        item2_path.write_text("Ja tässä on kolmas lause. Neljäs lause on täällä.", encoding="utf-8")
+        item2 = DatasetItem(item2_path)
+
+        generate_fasttext_sentence_data(
+            items=[item1, item2],
+            label="human",
+            output_path=out_file,
+            min_word_count=4
+        )
+
+        assert out_file.exists()
+        lines = out_file.read_text(encoding="utf-8").splitlines()
+
+        assert len(lines) == 4
+        assert all(line.startswith("__label__human ") for line in lines)
+        assert "__label__human Tämä on ensimmäinen lause." in lines
+        assert "__label__human Tämä on toinen lause." in lines
+        assert "__label__human Ja tässä on kolmas lause." in lines
+        assert "__label__human Neljäs lause on täällä." in lines

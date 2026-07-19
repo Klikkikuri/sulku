@@ -15,7 +15,7 @@ from sulku.dataset.reader import (
     language_filter,
 )
 from sulku.dataset.generator import SyntheticDatasetGenerator
-from sulku.dataset.paired import ItemPair, PairedDataset, load_paired_dataset
+from sulku.dataset.paired import ItemPair, PairedDataset, load_paired_dataset, generate_fasttext_sentence_data
 
 __all__ = [
     "DatasetItem",
@@ -29,6 +29,7 @@ __all__ = [
     "ItemPair",
     "PairedDataset",
     "load_paired_dataset",
+    "generate_fasttext_sentence_data",
 ]
 
 

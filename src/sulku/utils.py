@@ -58,9 +58,9 @@ def strip_markdown(text: str | None) -> str:
     text = re.sub(r"\*\*\*([^*]+?)\*\*\*", r"\1", text)
     text = re.sub(r"\*\*([^*]+?)\*\*", r"\1", text)
     text = re.sub(r"\*([^*]+?)\*", r"\1", text)
-    text = re.sub(r"___([^_]+?)___", r"\1", text)
-    text = re.sub(r"__([^_]+?)__", r"\1", text)
-    text = re.sub(r"_([^_]+?)_", r"\1", text)
+    text = re.sub(r"\b___([^_]+?)___\b", r"\1", text)
+    text = re.sub(r"\b__([^_]+?)__\b", r"\1", text)
+    text = re.sub(r"\b_([^_]+?)_\b", r"\1", text)
     text = re.sub(r"~~([^~]+?)~~", r"\1", text)
 
     # 11. Remove blockquote markers (e.g., "> ")
@@ -96,3 +96,44 @@ def count_words(text: str | None) -> int:
     # Filter words to only count those with at least one alphanumeric character
     filtered_words = [w for w in words if any(c.isalnum() for c in w)]
     return len(filtered_words)
+
+
+_SPACY_NLP_CACHE: dict = {}
+
+
+def sentencize(text: str | None, lang: str = "fi") -> list[str]:
+    """
+    Split text content into individual sentences.
+
+    This uses spaCy's blank language model with a sentencizer pipe component
+    if spaCy is available. If spaCy is not installed, it falls back to a
+    regex-based sentence splitter.
+
+    :param text: The text content to split.
+    :type text: str | None
+    :param lang: The language code for the tokenizer (defaults to "fi").
+    :type lang: str
+    :return: A list of sentence strings.
+    :rtype: list[str]
+    """
+    if not text:
+        return []
+
+    try:
+        import spacy
+
+        if lang not in _SPACY_NLP_CACHE:
+            nlp = spacy.blank(lang)
+            nlp.add_pipe("sentencizer")
+            _SPACY_NLP_CACHE[lang] = nlp
+        else:
+            nlp = _SPACY_NLP_CACHE[lang]
+
+        doc = nlp(text)
+        return [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+    except (ImportError, Exception):
+        # Fallback basic regex splitter
+        import re
+
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        return [s.strip() for s in sentences if s.strip()]

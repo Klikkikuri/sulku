@@ -6,7 +6,7 @@ Tests the strip_markdown and count_words helper functions under various
 formatting and structure styles, ensuring correct output and count.
 """
 
-from sulku.utils import count_words, strip_markdown
+from sulku.utils import count_words, sentencize, strip_markdown
 
 
 def test_strip_markdown_none_and_empty():
@@ -102,3 +102,29 @@ def test_strip_markdown_contractions_and_punctuation():
     """Test that words with contractions or hyphens are counted properly."""
     text = "It's a self-explanatory word-count."
     assert count_words(text) == 4
+
+
+def test_strip_markdown_snake_case():
+    """Test that snake_case words (internal underscores) are not corrupted by emphasis stripping."""
+    text = "This is a some_word_with_underscores and another_one."
+    assert strip_markdown(text) == "This is a some_word_with_underscores and another_one."
+
+
+def test_sentencize_basic():
+    """Test basic sentence segmentation using sentencize."""
+    text = "Tämä on ensimmäinen lause. Tämä on toinen lause! Ja kolmas?"
+    expected = [
+        "Tämä on ensimmäinen lause.",
+        "Tämä on toinen lause!",
+        "Ja kolmas?",
+    ]
+    assert sentencize(text) == expected
+
+
+def test_sentencize_abbreviations():
+    """Test that common abbreviations do not split sentences incorrectly if possible."""
+    text = "Matti osti esim. omenoita. Pekka puolestaan osti päärynöitä."
+    res = sentencize(text)
+    assert len(res) == 2
+    assert res[0].startswith("Matti")
+    assert res[1].startswith("Pekka")

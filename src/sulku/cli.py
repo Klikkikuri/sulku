@@ -266,12 +266,19 @@ def sample(
     default=None,
     help="Destination directory.",
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Force generation even if synthetic data already exists.",
+)
 def generate_synthetic(
     dataset_path: Path,
     count: int,
     model: str,
     seed: int | None,
     dest_dir: Path | None,
+    force: bool,
 ) -> None:
     """
     Generate synthetic articles from sampled articles of a dataset.
@@ -286,6 +293,8 @@ def generate_synthetic(
     :type seed: int | None
     :param dest_dir: Destination directory.
     :type dest_dir: Path | None
+    :param force: Force generation even if synthetic data already exists.
+    :type force: bool
     """
     try:
         generator = SyntheticDatasetGenerator(
@@ -297,7 +306,7 @@ def generate_synthetic(
             f"Sampling {count} articles and generating synthetic articles using model '{model}'..."
         )
         generated_files = generator.generate(
-            n_samples=count, seed=seed, dest_dir=dest_dir
+            n_samples=count, seed=seed, dest_dir=dest_dir, force=force
         )
 
         click.echo(f"Successfully generated {len(generated_files)} synthetic articles:")
@@ -307,3 +316,113 @@ def generate_synthetic(
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+
+@main.command(name="generate-fasttext")
+@click.argument(
+    "dataset_path", type=click.Path(exists=True, file_okay=False, path_type=Path)
+)
+@click.option(
+    "-o",
+    "--output-file",
+    type=click.Path(dir_okay=False, path_type=Path),
+    required=True,
+    help="Path to the output file where FastText data will be written.",
+)
+@click.option(
+    "-l",
+    "--label",
+    type=str,
+    required=True,
+    help="Class label to prefix each sentence (e.g. 'human', 'machine').",
+)
+@click.option(
+    "-mw",
+    "--min-words",
+    type=int,
+    default=4,
+    help="Minimum number of words required to keep a sentence.",
+)
+@click.option(
+    "--lang",
+    type=str,
+    default="fi",
+    help="Language code for the tokenizer/sentencizer (e.g. 'fi', 'en').",
+)
+@click.option(
+    "-p",
+    "--pattern",
+    type=str,
+    default="*",
+    help="Glob pattern to filter files.",
+)
+@click.option(
+    "-r",
+    "--recursive/--no-recursive",
+    default=True,
+    help="Whether to search recursively.",
+)
+@click.option(
+    "-a",
+    "--append",
+    is_flag=True,
+    help="Append to the output file instead of overwriting.",
+)
+def generate_fasttext(
+    dataset_path: Path,
+    output_file: Path,
+    label: str,
+    min_words: int,
+    lang: str,
+    pattern: str,
+    recursive: bool,
+    append: bool,
+) -> None:
+    """
+    Generate FastText formatted sentence training data from markdown files.
+
+    :param dataset_path: Path to the dataset directory.
+    :type dataset_path: Path
+    :param output_file: Path to the output text file.
+    :type output_file: Path
+    :param label: Label to prefix sentences with.
+    :type label: str
+    :param min_words: Minimum words to keep a sentence.
+    :type min_words: int
+    :param lang: Language for sentence segmenter.
+    :type lang: str
+    :param pattern: Glob pattern to filter files.
+    :type pattern: str
+    :param recursive: Search recursively if True.
+    :type recursive: bool
+    :param append: Append to output file if True.
+    :type append: bool
+    """
+    try:
+        from sulku.dataset import FileDataset, generate_fasttext_sentence_data
+
+        dataset = FileDataset(dataset_path, pattern=pattern, recursive=recursive)
+        if not dataset:
+            click.echo(
+                f"Error: No files found matching pattern '{pattern}' under {dataset_path}.",
+                err=True,
+            )
+            sys.exit(1)
+
+        mode = "a" if append else "w"
+        click.echo(
+            f"Generating FastText sentence data from {len(dataset)} items in {dataset_path}..."
+        )
+        generate_fasttext_sentence_data(
+            items=dataset,
+            label=label,
+            output_path=output_file,
+            lang=lang,
+            min_word_count=min_words,
+            mode=mode,
+        )
+        click.echo(f"Successfully wrote FastText sentence data to {output_file}")
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+

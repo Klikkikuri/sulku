@@ -340,3 +340,48 @@ def load_paired_dataset(
         source_metadata_loader=source_metadata_loader,
         synth_metadata_loader=synth_metadata_loader,
     )
+
+
+def generate_fasttext_sentence_data(
+    items: Sequence[DatasetItem],
+    label: str,
+    output_path: Union[str, Path],
+    lang: str = "fi",
+    min_word_count: int = 4,
+    mode: str = "a",
+) -> None:
+    """
+    Generate FastText formatted sentence training data from a sequence of markdown articles.
+
+    Each document's YAML front matter and markdown formatting are stripped. Then, the
+    plain text is split into sentences using standard sentencize. Valid sentences with
+    word counts meeting or exceeding min_word_count are written to output_path.
+
+    :param items: Sequence of DatasetItem objects containing markdown articles.
+    :type items: Sequence[DatasetItem]
+    :param label: Class label to prefix each sentence with (e.g. 'human', 'synthetic').
+    :type label: str
+    :param output_path: Path to the output text file where FastText data will be written.
+    :type output_path: Union[str, Path]
+    :param lang: Language code for tokenizer/sentencizer. Defaults to 'fi'.
+    :type lang: str
+    :param min_word_count: Minimum words in a sentence to keep it in training. Defaults to 4.
+    :type min_word_count: int
+    :param mode: File open mode, 'w' to overwrite or 'a' to append. Defaults to 'a'.
+    :type mode: str
+    """
+    from sulku.utils import count_words, sentencize, strip_markdown
+
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(out_path, mode, encoding="utf-8") as f:
+        for item in items:
+            raw_content = item.content
+            plain_text = strip_markdown(raw_content)
+            sentences = sentencize(plain_text, lang=lang)
+            for sentence in sentences:
+                sentence_cleaned = " ".join(sentence.split())
+                if count_words(sentence_cleaned) >= min_word_count:
+                    f.write(f"__label__{label} {sentence_cleaned}\n")
+
