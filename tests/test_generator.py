@@ -36,7 +36,7 @@ def dummy_dataset_dir():
             "language: fi\n"
             'title: "Artikkeli Yksi"\n'
             "---\n"
-            "Tämä on ensimmäinen artikkeli testejä varten.",
+            "Tämä on ensimmäinen artikkeli testejä varten. " + " ".join(["sana"] * 60),
             encoding="utf-8",
         )
 
@@ -47,7 +47,7 @@ def dummy_dataset_dir():
             "language: fi\n"
             'title: "Artikkeli Kaksi"\n'
             "---\n"
-            "Tämä on toinen artikkeli testejä varten. Siinä on vähän enemmän sanoja.",
+            "Tämä on toinen artikkeli testejä varten. " + " ".join(["sana"] * 60),
             encoding="utf-8",
         )
 
@@ -273,4 +273,46 @@ def test_generate_skip_existing(
     assert len(generated_paths_third) == 2
     assert mock_summarize.call_count == 0
     assert mock_create_synthetic.call_count == 2
+
+
+@patch("sulku.dataset.generator.create_synthetic_article")
+@patch("sulku.dataset.generator.summarize_text")
+def test_generate_min_words_filter(
+    mock_summarize,
+    mock_create_synthetic,
+    dummy_dataset_dir,
+    dummy_cache_dir,
+    dummy_dest_dir,
+    mock_summary,
+):
+    """Test that articles below min_words are filtered out during generation."""
+    # Write a short/empty article (under 50 words) to dummy dataset
+    short_art_dir = dummy_dataset_dir / "2021" / "01" / "0000"
+    short_art = short_art_dir / "short_art.md"
+    short_art.write_text(
+        "---\nid: yle-short\nlanguage: fi\ntitle: Lyhyt\n---\nLyhyt teksti.",
+        encoding="utf-8",
+    )
+
+    generator = SyntheticDatasetGenerator(
+        source_dir=dummy_dataset_dir, model_name="test-model", cache_dir=dummy_cache_dir
+    )
+
+    mock_summarize.return_value = mock_summary
+    mock_create_synthetic.return_value = "Tämä on tekoälyn luoma synteettinen artikkeli."
+
+    # Generate with min_words=50: there are only 2 articles with >=50 words, so we can sample at most 2.
+    # If we try to sample 3, it should raise ValueError.
+    with pytest.raises(ValueError):
+        generator.generate(n_samples=3, seed=100, dest_dir=dummy_dest_dir, min_words=50)
+
+    # Sampling 2 should succeed and exclude the short article.
+    generated_paths = generator.generate(
+        n_samples=2, seed=100, dest_dir=dummy_dest_dir, min_words=50
+    )
+    assert len(generated_paths) == 2
+    # Verify that the short article is not in the generated paths
+    for path in generated_paths:
+        assert path.name != "short_art.md"
+
 

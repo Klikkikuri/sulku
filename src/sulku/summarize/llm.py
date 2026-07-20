@@ -6,7 +6,7 @@ from ..utils import count_words
 
 from ..dataset.reader import DatasetItem
 from .models import ArticleSummary, StyleVector
-from sulku.constants import DEFAULT_MODEL
+from sulku.constants import DEFAULT_MODEL, SUMMARIZE_MODEL
 
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
@@ -148,11 +148,19 @@ def _check_completion_choice(choice: Any) -> None:
     if getattr(choice, "finish_reason", None) == "content_filter":
         raise ValueError("LLM request was rejected due to content filtering.")
     if getattr(choice, "finish_reason", None) == "length":
-        # raise ValueError("LLM generation reached the token limit (finish_reason: length).")
         logger.warning("LLM generation reached the token limit (finish_reason: length).", extra={"choice": choice})
+        raise ValueError("LLM generation reached the token limit (finish_reason: length).")
 
 
-def summarize_text(text: str, model: str = DEFAULT_MODEL) -> ArticleSummary:
+def summarize_text(text: str, model: str = SUMMARIZE_MODEL) -> ArticleSummary:
+    """
+    Summarize the given text using the specified LLM model.
+
+    :param text: The text to summarize.
+    :param model: The LLM model to use.
+    :return: The generated article summary.
+    :raises ValueError: If the LLM response does not contain any choices or if the choice is rejected.
+    """
     client = create_client()
     response = client.chat.completions.parse(
         model=model,

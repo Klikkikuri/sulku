@@ -18,3 +18,4 @@ CACHE_SUBDIR = "summaries"
 
 # Model defaults
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
+SUMMARIZE_MODEL = "gemini-3.1-flash-lite"

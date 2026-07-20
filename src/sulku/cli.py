@@ -272,6 +272,13 @@ def sample(
     default=False,
     help="Force generation even if synthetic data already exists.",
 )
+@click.option(
+    "-mw",
+    "--min-words",
+    type=int,
+    default=50,
+    help="Minimum number of words required to keep an article.",
+)
 def generate_synthetic(
     dataset_path: Path,
     count: int,
@@ -279,6 +286,7 @@ def generate_synthetic(
     seed: int | None,
     dest_dir: Path | None,
     force: bool,
+    min_words: int,
 ) -> None:
     """
     Generate synthetic articles from sampled articles of a dataset.
@@ -295,6 +303,8 @@ def generate_synthetic(
     :type dest_dir: Path | None
     :param force: Force generation even if synthetic data already exists.
     :type force: bool
+    :param min_words: Minimum number of words required to keep an article.
+    :type min_words: int
     """
     try:
         generator = SyntheticDatasetGenerator(
@@ -306,7 +316,7 @@ def generate_synthetic(
             f"Sampling {count} articles and generating synthetic articles using model '{model}'..."
         )
         generated_files = generator.generate(
-            n_samples=count, seed=seed, dest_dir=dest_dir, force=force
+            n_samples=count, seed=seed, dest_dir=dest_dir, force=force, min_words=min_words
         )
 
         click.echo(f"Successfully generated {len(generated_files)} synthetic articles:")

@@ -11,13 +11,14 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import logging
+import random
 from pathlib import Path
 from typing import Any, Optional, TypedDict, Union, cast
 
 import yaml
 from platformdirs import user_cache_dir
 
-from sulku.dataset.reader import DatasetItem, FileDataset
+from sulku.dataset.reader import DatasetItem, FileDataset, min_words_filter
 from sulku.summarize.llm import create_synthetic_article, summarize_text
 from sulku.summarize.models import ArticleSummary
 from sulku.constants import (
@@ -195,6 +196,7 @@ class SyntheticDatasetGenerator:
         seed: Optional[int] = None,
         dest_dir: Optional[Union[str, Path]] = None,
         force: bool = False,
+        min_words: Optional[int] = 50,
     ) -> list[Path]:
         """
         Generate a synthetic dataset from sampled articles.
@@ -210,6 +212,8 @@ class SyntheticDatasetGenerator:
         :type dest_dir: Union[str, Path], optional
         :param force: Force generation even if synthetic data already exists.
         :type force: bool
+        :param min_words: Minimum number of words required to keep an article.
+        :type min_words: int, optional
         :return: List of generated synthetic article file paths.
         :rtype: list[Path]
         """
@@ -230,7 +234,27 @@ class SyntheticDatasetGenerator:
                 f"Sample size {n_samples} is larger than dataset size {len(dataset)}"
             )
 
-        sampled_items = dataset.sample(k=n_samples, seed=seed)
+        # Shuffle the files first to allow lazy filtering without reading the entire dataset
+        files = list(dataset._files)
+        if seed is not None:
+            rng = random.Random(seed)
+            rng.shuffle(files)
+        else:
+            random.shuffle(files)
+
+        sampled_items = []
+        for f in files:
+            if len(sampled_items) == n_samples:
+                break
+            item = dataset.item_class(f, dataset.metadata_loader)
+            if min_words is None or min_words_filter(min_words)(item):
+                sampled_items.append(item)
+
+        if len(sampled_items) < n_samples:
+            raise ValueError(
+                f"Sample size {n_samples} is larger than the number of available "
+                f"matching files ({len(sampled_items)}) in the dataset."
+            )
         generated_paths = []
 
         for article in sampled_items:

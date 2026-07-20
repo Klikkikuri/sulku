@@ -134,7 +134,7 @@ def test_cli_generate_synthetic_success(mock_generator_class):
             source_dir=Path(tmpdir), model_name="test-model"
         )
         mock_generator.generate.assert_called_once_with(
-            n_samples=2, seed=100, dest_dir=None, force=False
+            n_samples=2, seed=100, dest_dir=None, force=False, min_words=50
         )
 
 
@@ -156,7 +156,7 @@ def test_cli_generate_synthetic_force(mock_generator_class):
 
         assert result.exit_code == 0
         mock_generator.generate.assert_called_once_with(
-            n_samples=1, seed=None, dest_dir=None, force=True
+            n_samples=1, seed=None, dest_dir=None, force=True, min_words=50
         )
 
 
