@@ -1,5 +1,6 @@
 import os
 import logging
+import contextvars
 from typing import Any, Optional
 
 from ..utils import count_words
@@ -115,19 +116,30 @@ The generated article is too short ({{ gen_words }} words). The article should b
 """ Instructions to rewrite synthetic article to be longer """
 
 
-def create_client():
+_client_var: contextvars.ContextVar[openai.OpenAI] = contextvars.ContextVar("openai_client")
 
-    gemini = os.getenv("GEMINI_API_KEY")
 
-    if gemini:
-        client = openai.OpenAI(
-            api_key=gemini,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-        )
-    else:
-        raise ValueError("GEMINI_API_KEY environment variable is not set.")
+def create_client() -> openai.OpenAI:
+    """
+    Retrieve or create the OpenAI client stored in the context-local context variable.
 
-    return client
+    :return: The OpenAI client instance.
+    :rtype: openai.OpenAI
+    :raises ValueError: If the GEMINI_API_KEY environment variable is not set.
+    """
+    try:
+        return _client_var.get()
+    except LookupError:
+        gemini = os.getenv("GEMINI_API_KEY")
+        if gemini:
+            client = openai.OpenAI(
+                api_key=gemini,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+            )
+            _client_var.set(client)
+            return client
+        else:
+            raise ValueError("GEMINI_API_KEY environment variable is not set.")
 
 
 def prompt(template: str, **template_args: object) -> str:

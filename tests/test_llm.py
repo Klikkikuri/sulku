@@ -207,7 +207,8 @@ def test_check_completion_choice_length(caplog):
     mock_choice.finish_reason = "length"
 
     with caplog.at_level(logging.WARNING):
-        _check_completion_choice(mock_choice)
+        with pytest.raises(ValueError):
+            _check_completion_choice(mock_choice)
     assert "LLM generation reached the token limit" in caplog.text
 
 
@@ -226,4 +227,46 @@ def test_create_synthetic_article_rejection(mock_create_client, mock_article, mo
     with pytest.raises(ValueError) as excinfo:
         create_synthetic_article(article=mock_article, summary=mock_summary)
     assert "rejected by the model: Safety violation" in str(excinfo.value)
+
+
+def test_create_client_contextvars():
+    """Test that create_client uses a context variable to cache and retrieve the client."""
+    from sulku.summarize.llm import create_client
+    import os
+    import contextvars
+
+    # Save original env and context var state
+    orig_env = os.environ.get("GEMINI_API_KEY")
+    os.environ["GEMINI_API_KEY"] = "dummy-key"
+
+    # We run the test in a clean context to avoid affecting other tests
+    def run_test():
+        # First call creates the client
+        client_1 = create_client()
+        assert client_1 is not None
+
+        # Second call returns the exact same client instance
+        client_2 = create_client()
+        assert client_1 is client_2
+
+        # A new empty context will recreate the client
+        def run_in_new_context():
+            client_new = create_client()
+            assert client_new is not client_1
+            assert create_client() is client_new
+
+        new_ctx = contextvars.Context()
+        new_ctx.run(run_in_new_context)
+
+    try:
+        # Run inside a fresh context so we don't pollute the global/thread context
+        test_ctx = contextvars.Context()
+        test_ctx.run(run_test)
+    finally:
+        # Restore environment
+        if orig_env is None:
+            del os.environ["GEMINI_API_KEY"]
+        else:
+            os.environ["GEMINI_API_KEY"] = orig_env
+
 
