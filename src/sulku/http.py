@@ -27,13 +27,17 @@ def _patched_predict(self, text, k=1, threshold=0.0, on_unicode_error="strict"):
 
             def check(entry):
                 if entry.find("\n") != -1:
-                    raise ValueError("predict processes one line at a time (remove '\\n')")
+                    raise ValueError(
+                        "predict processes one line at a time (remove '\\n')"
+                    )
                 entry += "\n"
                 return entry
 
             if isinstance(text, list):
                 text = [check(entry) for entry in text]
-                all_labels, all_probs = self.f.multilinePredict(text, k, threshold, on_unicode_error)
+                all_labels, all_probs = self.f.multilinePredict(
+                    text, k, threshold, on_unicode_error
+                )
                 return all_labels, [np.asarray(p) for p in all_probs]
             else:
                 text = check(text)
@@ -58,7 +62,9 @@ async def lifespan(app: FastAPI):
     # Load models ONCE on server startup
     try:
         for model_name, model_path in MODEL_PATHS.items():
-            models[model_name] = fasttext.load_model(str(model_path.resolve().absolute()))
+            models[model_name] = fasttext.load_model(
+                str(model_path.resolve().absolute())
+            )
         # models["deepseek"] = fasttext.load_model(MODEL_PATHS["deepseek"])
         # models["qwen"] = fasttext.load_model(MODEL_PATHS["qwen"])
         yield
@@ -68,7 +74,9 @@ async def lifespan(app: FastAPI):
 
 
 class ClassificationRequest(BaseModel):
-    text: str = Field(..., min_length=10, description="The document or sentence to analyze.")
+    text: str = Field(
+        ..., min_length=10, description="The document or sentence to analyze."
+    )
 
 
 class ClassificationResponse(BaseModel):
@@ -150,8 +158,12 @@ def _score_model(
     :param paragraph_sentences: Grouped sentence strings per paragraph.
     :return: A tuple of (model_name, final_score, paragraph_scores, model_confidence).
     """
-    multi_sentence_paragraphs = [sentences for sentences in paragraph_sentences if len(sentences) > 1]
-    filtered_paragraphs = multi_sentence_paragraphs if multi_sentence_paragraphs else paragraph_sentences
+    multi_sentence_paragraphs = [
+        sentences for sentences in paragraph_sentences if len(sentences) > 1
+    ]
+    filtered_paragraphs = (
+        multi_sentence_paragraphs if multi_sentence_paragraphs else paragraph_sentences
+    )
 
     paragraph_scores: list[float] = []
     paragraph_weights: list[float] = []
@@ -160,7 +172,7 @@ def _score_model(
     for sentences in filtered_paragraphs:
         sentence_scores: list[float] = []
         sentence_margins: list[float] = []
-        paragraph_word_count = sum(len(sentence.split()) for sentence in sentences)
+        sentence_weights: list[float] = []
 
         for sentence in sentences:
             labels, probabilities = model.predict(sentence, k=2)  # request both labels
@@ -173,17 +185,26 @@ def _score_model(
             p_ai = label_probs.get(LABEL_AI, 0.0)
             # If the model only returned one label (rare, but possible on short/degenerate input),
             # treat the missing one as the complement.
-            p_human = label_probs.get(LABEL_HUMAN, 1.0 - p_ai) if len(label_probs) > 1 else 1.0 - p_ai
+            p_human = (
+                label_probs.get(LABEL_HUMAN, 1.0 - p_ai)
+                if len(label_probs) > 1
+                else 1.0 - p_ai
+            )
 
             sentence_scores.append(p_ai)
             sentence_margins.append(abs(p_ai - p_human))
+            sentence_weights.append(float(max(1, len(sentence.split()))))
 
         if not sentence_scores:
             continue
 
-        paragraph_scores.append(float(np.mean(sentence_scores)))
-        paragraph_weights.append(float(max(1, paragraph_word_count)))
-        paragraph_margins.append(float(np.mean(sentence_margins)))
+        paragraph_scores.append(
+            float(np.average(sentence_scores, weights=sentence_weights))
+        )
+        paragraph_weights.append(float(sum(sentence_weights)))
+        paragraph_margins.append(
+            float(np.average(sentence_margins, weights=sentence_weights))
+        )
 
     if not paragraph_scores:
         raise ValueError(f"Model '{model_name}' returned no predictions.")
@@ -199,7 +220,9 @@ async def classify_text(req: Request):
         raise HTTPException(status_code=500, detail="Models not initialized.")
 
     content_type = req.headers.get("content-type", "")
-    main_type = content_type.split(";")[0].strip().lower() if content_type else "text/plain"
+    main_type = (
+        content_type.split(";")[0].strip().lower() if content_type else "text/plain"
+    )
 
     # Read raw body bytes to verify content
     body_bytes = await req.body()
@@ -222,7 +245,10 @@ async def classify_text(req: Request):
 
     # Apply minimum length validation on raw input
     if len(text) < 10:
-        raise HTTPException(status_code=422, detail="Text content is too short (less than 10 characters).")
+        raise HTTPException(
+            status_code=422,
+            detail="Text content is too short (less than 10 characters).",
+        )
 
     # If it is markdown, strip formatting and frontmatter
     if is_markdown_content:
@@ -235,7 +261,10 @@ async def classify_text(req: Request):
 
     paragraph_sentences = _paragraph_sentences(text)
     if not paragraph_sentences:
-        raise HTTPException(status_code=422, detail="Text content does not contain classifiable paragraphs.")
+        raise HTTPException(
+            status_code=422,
+            detail="Text content does not contain classifiable paragraphs.",
+        )
 
     ai_votes = 0
     predictions = {}
@@ -245,7 +274,8 @@ async def classify_text(req: Request):
     try:
         with ThreadPoolExecutor(max_workers=max(1, len(models))) as executor:
             futures = {
-                executor.submit(_score_model, name, model, paragraph_sentences): name for name, model in models.items()
+                executor.submit(_score_model, name, model, paragraph_sentences): name
+                for name, model in models.items()
             }
             model_results: list[tuple[str, float, list[float], float]] = []
 
@@ -254,7 +284,9 @@ async def classify_text(req: Request):
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    for name, model_score, paragraph_scores, model_confidence in sorted(model_results, key=lambda item: item[0]):
+    for name, model_score, paragraph_scores, model_confidence in sorted(
+        model_results, key=lambda item: item[0]
+    ):
         for idx, paragraph_score in enumerate(paragraph_scores, start=1):
             logger.info("model=%s paragraph=%d score=%.6f", name, idx, paragraph_score)
 
@@ -268,7 +300,9 @@ async def classify_text(req: Request):
             ai_votes += 1
 
     final_score = float(np.mean(list(predictions.values()))) if predictions else 0.0
-    final_confidence = float(np.mean(list(confidences.values()))) if confidences else 0.0
+    final_confidence = (
+        float(np.mean(list(confidences.values()))) if confidences else 0.0
+    )
     logger.info("ensemble final_score=%.6f", final_score)
     logger.info("ensemble final_confidence=%.6f", final_confidence)
 

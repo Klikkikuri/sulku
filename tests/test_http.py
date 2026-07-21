@@ -94,7 +94,9 @@ def test_classify_text_markdown_success():
             )
             assert response.status_code == 200
             # Ensure model.predict was called with normalized plain text (no markdown markers/newlines/frontmatter).
-            expected_content = "Heading This is the actual content that will be analyzed."
+            expected_content = (
+                "Heading This is the actual content that will be analyzed."
+            )
             mock_model.predict.assert_called_once_with(expected_content, k=2)
 
 
@@ -120,7 +122,9 @@ def test_classify_text_raw_markdown_success():
                 headers={"Content-Type": "text/markdown"},
             )
             assert response.status_code == 200
-            expected_content = "Heading This is the actual content that will be analyzed."
+            expected_content = (
+                "Heading This is the actual content that will be analyzed."
+            )
             mock_model.predict.assert_called_once_with(expected_content, k=2)
 
 
@@ -161,7 +165,9 @@ def test_classify_text_weighted_paragraph_aggregation():
             "sulku.http.sentencize",
             side_effect=[
                 ["Short paragraph."],
-                ["This paragraph has many words and should dominate weighted aggregation."],
+                [
+                    "This paragraph has many words and should dominate weighted aggregation."
+                ],
             ],
         ):
             with TestClient(create_app()) as client:
@@ -184,7 +190,9 @@ def test_classify_text_markdown_too_short():
     # Patch fasttext.load_model
     with patch("sulku.http.fasttext.load_model", return_value=mock_model):
         with TestClient(create_app()) as client:
-            markdown_content = "---\n" "title: A very long frontmatter title here\n" "---\n" "short"
+            markdown_content = (
+                "---\ntitle: A very long frontmatter title here\n---\nshort"
+            )
             response = client.post(
                 "/api/v1/aidetect/",
                 content=markdown_content,
@@ -204,3 +212,36 @@ def test_classify_text_binary_rejected():
         )
         assert response.status_code == 415
         assert "binary" in response.json()["detail"].lower()
+
+
+def test_classify_text_weighted_sentence_aggregation():
+    """Test model score uses sentence-level word-count weighting inside a paragraph."""
+    mock_model = MagicMock()
+    mock_model.predict.side_effect = [
+        ((LABEL_AI,), [0.1]),
+        ((LABEL_AI,), [0.9]),
+    ]
+
+    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+        with patch(
+            "sulku.http.sentencize",
+            side_effect=[
+                [
+                    "Thank you!",
+                    "This is a much longer sentence that has exactly ten words.",
+                ],
+            ],
+        ):
+            with TestClient(create_app()) as client:
+                content = "Thank you! This is a much longer sentence that has exactly ten words."
+                response = client.post(
+                    "/api/v1/aidetect/",
+                    content=content,
+                    headers={"Content-Type": "text/plain"},
+                )
+
+                assert response.status_code == 200
+                final_score = response.json()["final_score"]
+                # Expected sentence-weighted score for the single paragraph:
+                # (0.1*2 + 0.9*11) / (2+11) = 0.7769230769...
+                assert abs(final_score - 0.7769230769) < 1e-6
