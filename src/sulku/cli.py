@@ -525,9 +525,17 @@ def detect(file_path: Path, url: str) -> None:
             click.echo(f"Result for {file_path.name}:")
             click.echo(f"  AI-Generated: {result['is_ai']}")
             click.echo(f"  Votes: {result['ai_votes']}/{result['total_models']}")
+            if "final_score" in result:
+                click.echo(f"  Final Score: {result['final_score']:.4f}")
+            if "final_confidence" in result:
+                click.echo(f"  Final Confidence: {result['final_confidence']:.4f}")
             click.echo("  Predictions:")
             for name, score in result["predictions"].items():
-                click.echo(f"    - {name}: {score:.4f}")
+                model_confidence = result.get("confidences", {}).get(name)
+                if model_confidence is None:
+                    click.echo(f"    - {name}: {score:.4f}")
+                else:
+                    click.echo(f"    - {name}: {score:.4f} (confidence: {model_confidence:.4f})")
         else:
             click.echo(f"Error from service (status {r.status_code}): {r.text}", err=True)
             sys.exit(1)

@@ -300,7 +300,10 @@ def test_cli_detect_success(mock_post):
         "is_ai": False,
         "ai_votes": 1,
         "total_models": 1,
+        "final_score": 0.85,
+        "final_confidence": 0.70,
         "predictions": {"gemini-3.1-flash-lite": 0.85},
+        "confidences": {"gemini-3.1-flash-lite": 0.70},
     }
     mock_post.return_value = mock_response
 
@@ -315,6 +318,9 @@ def test_cli_detect_success(mock_post):
         assert "Sending" in result.output
         assert "AI-Generated: False" in result.output
         assert "Votes: 1/1" in result.output
+        assert "Final Score: 0.8500" in result.output
+        assert "Final Confidence: 0.7000" in result.output
+        assert "gemini-3.1-flash-lite: 0.8500 (confidence: 0.7000)" in result.output
         mock_post.assert_called_once_with(
             "http://127.0.0.1:8000/api/v1/aidetect/",
             content="This is some sample text to analyze.",
@@ -332,7 +338,10 @@ def test_cli_detect_markdown_success(mock_post):
         "is_ai": False,
         "ai_votes": 1,
         "total_models": 1,
+        "final_score": 0.85,
+        "final_confidence": 0.70,
         "predictions": {"gemini-3.1-flash-lite": 0.85},
+        "confidences": {"gemini-3.1-flash-lite": 0.70},
     }
     mock_post.return_value = mock_response
 

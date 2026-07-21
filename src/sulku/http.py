@@ -6,12 +6,14 @@ import logging
 import numpy as np
 from pydantic import BaseModel, Field
 import re
-import yaml
 
 # import fasttext
 from sulku.wpapi import wpapi_router
 from .constants import LABEL_AI, LABEL_HUMAN, MODEL_PATHS
 from sulku.utils import sentencize, strip_markdown
+
+# NOTE: This module supports only Finnish sentence segmentation.
+SENTENCIZE_LANGUAGE = "fi"
 
 # Monkey-patch fasttext for NumPy 2.x compatibility
 _orig_predict = fasttext.FastText._FastText.predict
@@ -74,25 +76,33 @@ class ClassificationResponse(BaseModel):
     ai_votes: int
     total_models: int
     final_score: float
+    final_confidence: float
     predictions: dict[str, float]
+    confidences: dict[str, float]
 
 
 router = APIRouter(prefix="/api/v1/aidetect", tags=["classification"])
 
 
-def _paragraph_sentences(text: str, lang: str = "fi") -> list[list[str]]:
+def _paragraph_sentences(text: str) -> list[list[str]]:
     """
     Build paragraph-level sentence units from text.
 
     Paragraphs are split by blank lines, then each paragraph is split into sentences.
     Sentences are whitespace-normalized so each unit can be safely passed to fastText
     without embedded newlines.
+
+    This endpoint currently supports only Finnish sentence segmentation.
     """
     raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
     paragraph_sentences: list[list[str]] = []
 
     for paragraph in raw_paragraphs:
-        sentences = [" ".join(sentence.split()) for sentence in sentencize(paragraph, lang=lang) if sentence.strip()]
+        sentences = [
+            " ".join(sentence.split())
+            for sentence in sentencize(paragraph, lang=SENTENCIZE_LANGUAGE)
+            if sentence.strip()
+        ]
         if not sentences:
             fallback = " ".join(paragraph.split())
             if fallback:
@@ -102,38 +112,6 @@ def _paragraph_sentences(text: str, lang: str = "fi") -> list[list[str]]:
             paragraph_sentences.append(sentences)
 
     return paragraph_sentences
-
-
-def _extract_frontmatter_language(markdown_text: str) -> str | None:
-    """
-    Extract language from YAML front matter in markdown text.
-
-    Supports both 'language' and 'lang' keys.
-    """
-    if not markdown_text.startswith("---"):
-        return None
-
-    parts = markdown_text.split("---", 2)
-    if len(parts) < 3:
-        return None
-
-    yaml_part = parts[1].strip()
-    try:
-        parsed = yaml.safe_load(yaml_part)
-    except Exception:
-        return None
-
-    if not isinstance(parsed, dict):
-        return None
-
-    for key in ("language", "lang"):
-        value = parsed.get(key)
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized:
-                return normalized
-
-    return None
 
 
 def verify_plain_text(body_bytes: bytes) -> None:
@@ -162,7 +140,7 @@ def _score_model(
     model_name: str,
     model: fasttext.FastText._FastText,
     paragraph_sentences: list[list[str]],
-) -> tuple[str, float, list[float]]:
+) -> tuple[str, float, list[float], float]:
     """Score one model against paragraph->sentence inputs.
 
     Confidence is calculated as the margin between the AI and human probabilities.
@@ -170,45 +148,49 @@ def _score_model(
     :param model_name: Name of the fastText model.
     :param model: Loaded fastText model.
     :param paragraph_sentences: Grouped sentence strings per paragraph.
-    :return: A tuple of (model_name, final_score, paragraph_scores).
+    :return: A tuple of (model_name, final_score, paragraph_scores, model_confidence).
     """
     multi_sentence_paragraphs = [sentences for sentences in paragraph_sentences if len(sentences) > 1]
     filtered_paragraphs = multi_sentence_paragraphs if multi_sentence_paragraphs else paragraph_sentences
 
     paragraph_scores: list[float] = []
     paragraph_weights: list[float] = []
+    paragraph_margins: list[float] = []
 
     for sentences in filtered_paragraphs:
         sentence_scores: list[float] = []
+        sentence_margins: list[float] = []
         paragraph_word_count = sum(len(sentence.split()) for sentence in sentences)
 
         for sentence in sentences:
-            labels, probabilities = model.predict(sentence, k=2)
+            labels, probabilities = model.predict(sentence, k=2)  # request both labels
             if not labels or len(probabilities) == 0:
                 continue
 
-            prob_ai = 0.0
-            prob_human = 0.0
-            for label, prob in zip(labels, probabilities):
-                if label == LABEL_AI:
-                    prob_ai = float(prob)
-                elif label == LABEL_HUMAN:
-                    prob_human = float(prob)
+            # Build a label -> probability map since fastText doesn't guarantee order
+            label_probs = dict(zip(labels, (float(p) for p in probabilities)))
 
-            confidence = prob_ai - prob_human
-            sentence_scores.append(confidence)
+            p_ai = label_probs.get(LABEL_AI, 0.0)
+            # If the model only returned one label (rare, but possible on short/degenerate input),
+            # treat the missing one as the complement.
+            p_human = label_probs.get(LABEL_HUMAN, 1.0 - p_ai) if len(label_probs) > 1 else 1.0 - p_ai
+
+            sentence_scores.append(p_ai)
+            sentence_margins.append(abs(p_ai - p_human))
 
         if not sentence_scores:
             continue
 
         paragraph_scores.append(float(np.mean(sentence_scores)))
         paragraph_weights.append(float(max(1, paragraph_word_count)))
+        paragraph_margins.append(float(np.mean(sentence_margins)))
 
     if not paragraph_scores:
         raise ValueError(f"Model '{model_name}' returned no predictions.")
 
     model_score = float(np.average(paragraph_scores, weights=paragraph_weights))
-    return model_name, model_score, paragraph_scores
+    model_confidence = float(np.average(paragraph_margins, weights=paragraph_weights))
+    return model_name, model_score, paragraph_scores, model_confidence
 
 
 @router.post("/", response_model=ClassificationResponse)
@@ -222,7 +204,6 @@ async def classify_text(req: Request):
     # Read raw body bytes to verify content
     body_bytes = await req.body()
     verify_plain_text(body_bytes)
-    sentencize_lang = "fi"
 
     is_markdown_content = False
 
@@ -245,9 +226,6 @@ async def classify_text(req: Request):
 
     # If it is markdown, strip formatting and frontmatter
     if is_markdown_content:
-        frontmatter_language = _extract_frontmatter_language(text)
-        if frontmatter_language:
-            sentencize_lang = frontmatter_language
         text = strip_markdown(text).strip()
         if len(text) < 10:
             raise HTTPException(
@@ -255,12 +233,13 @@ async def classify_text(req: Request):
                 detail="Text content is too short (less than 10 characters) after stripping markdown and frontmatter.",
             )
 
-    paragraph_sentences = _paragraph_sentences(text, lang=sentencize_lang)
+    paragraph_sentences = _paragraph_sentences(text)
     if not paragraph_sentences:
         raise HTTPException(status_code=422, detail="Text content does not contain classifiable paragraphs.")
 
     ai_votes = 0
     predictions = {}
+    confidences = {}
 
     # Score each model concurrently to reduce end-to-end latency.
     try:
@@ -268,26 +247,30 @@ async def classify_text(req: Request):
             futures = {
                 executor.submit(_score_model, name, model, paragraph_sentences): name for name, model in models.items()
             }
-            model_results: list[tuple[str, float, list[float]]] = []
+            model_results: list[tuple[str, float, list[float], float]] = []
 
             for future in as_completed(futures):
                 model_results.append(future.result())
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    for name, model_score, paragraph_scores in sorted(model_results, key=lambda item: item[0]):
+    for name, model_score, paragraph_scores, model_confidence in sorted(model_results, key=lambda item: item[0]):
         for idx, paragraph_score in enumerate(paragraph_scores, start=1):
             logger.info("model=%s paragraph=%d score=%.6f", name, idx, paragraph_score)
 
         predictions[name] = model_score
+        confidences[name] = model_confidence
         logger.info("model=%s final_score=%.6f", name, model_score)
+        logger.info("model=%s confidence=%.6f", name, model_confidence)
 
         # If the averaged paragraph score is above 0.5, register an AI vote.
         if model_score > 0.5:
             ai_votes += 1
 
     final_score = float(np.mean(list(predictions.values()))) if predictions else 0.0
+    final_confidence = float(np.mean(list(confidences.values()))) if confidences else 0.0
     logger.info("ensemble final_score=%.6f", final_score)
+    logger.info("ensemble final_confidence=%.6f", final_confidence)
 
     # Majority voting logic (e.g., flagged if 2 or more models agree)
     is_ai = ai_votes >= 2
@@ -297,7 +280,9 @@ async def classify_text(req: Request):
         ai_votes=ai_votes,
         total_models=len(models),
         final_score=final_score,
+        final_confidence=final_confidence,
         predictions=predictions,
+        confidences=confidences,
     )
 
 

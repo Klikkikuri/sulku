@@ -194,31 +194,6 @@ def test_classify_text_markdown_too_short():
             assert "too short" in response.json()["detail"]
 
 
-def test_classify_text_uses_frontmatter_language_for_sentencize():
-    """Test markdown frontmatter language is used as sentencize language."""
-    mock_model = MagicMock()
-    mock_model.predict.return_value = ((LABEL_AI,), [0.85])
-
-    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
-        with patch("sulku.http.sentencize", return_value=["Sentence one."]) as mock_sentencize:
-            with TestClient(create_app()) as client:
-                markdown_content = (
-                    "---\n"
-                    "title: Test Markdown\n"
-                    "language: en\n"
-                    "---\n"
-                    "This is the actual content that will be analyzed."
-                )
-                response = client.post(
-                    "/api/v1/aidetect/",
-                    content=markdown_content,
-                    headers={"Content-Type": "text/markdown"},
-                )
-                assert response.status_code == 200
-                assert mock_sentencize.call_count >= 1
-                assert mock_sentencize.call_args.kwargs["lang"] == "en"
-
-
 def test_classify_text_binary_rejected():
     """Test that binary content types (e.g. image/png) are rejected with 415."""
     with TestClient(create_app()) as client:
