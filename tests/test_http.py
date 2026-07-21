@@ -18,7 +18,7 @@ def test_classify_text_success():
     mock_model.predict.return_value = ((LABEL_AI,), [0.85])
 
     # Patch fasttext.load_model during TestClient context entry (lifespan)
-    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with TestClient(create_app()) as client:
             response = client.post(
                 "/api/v1/aidetect/",
@@ -38,7 +38,7 @@ def test_classify_text_success():
 
 def test_classify_text_validation_error():
     """Test validation errors for classify text (e.g. text too short)."""
-    with patch("sulku.http.fasttext.load_model"):
+    with patch("sulku.prediction.fasttext.load_model"):
         with TestClient(create_app()) as client:
             response = client.post(
                 "/api/v1/aidetect/",
@@ -77,7 +77,7 @@ def test_classify_text_markdown_success():
     mock_model.predict.return_value = ((LABEL_AI,), [0.85])
 
     # Patch fasttext.load_model during TestClient context entry (lifespan)
-    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with TestClient(create_app()) as client:
             markdown_content = (
                 "---\n"
@@ -106,7 +106,7 @@ def test_classify_text_raw_markdown_success():
     mock_model.predict.return_value = ((LABEL_AI,), [0.85])
 
     # Patch fasttext.load_model during TestClient context entry (lifespan)
-    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with TestClient(create_app()) as client:
             markdown_content = (
                 "---\n"
@@ -133,7 +133,7 @@ def test_classify_text_multiline_paragraphs_scored_per_paragraph():
     mock_model = MagicMock()
     mock_model.predict.return_value = ((LABEL_AI,), [0.9])
 
-    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with TestClient(create_app()) as client:
             content = (
                 "This is paragraph one with enough words to classify.\n"
@@ -146,8 +146,19 @@ def test_classify_text_multiline_paragraphs_scored_per_paragraph():
                 headers={"Content-Type": "text/plain"},
             )
             assert response.status_code == 200
-            assert abs(response.json()["final_score"] - 0.9) < 1e-6
-            assert mock_model.predict.call_count == 2
+            # Under HMM smoothing, the scores are smoothed and reinforce each other
+            assert abs(response.json()["final_score"] - 0.9696132596685083) < 1e-6
+
+            # With p_stay=0.5, HMM smoothing is a no-op and we get the raw 0.9 score
+            response_unsmoothed = client.post(
+                "/api/v1/aidetect/?p_stay=0.5",
+                content=content,
+                headers={"Content-Type": "text/plain"},
+            )
+            assert response_unsmoothed.status_code == 200
+            assert abs(response_unsmoothed.json()["final_score"] - 0.9) < 1e-6
+
+            assert mock_model.predict.call_count == 4
             for call in mock_model.predict.call_args_list:
                 assert "\n" not in call.args[0]
 
@@ -160,9 +171,9 @@ def test_classify_text_weighted_paragraph_aggregation():
         ((LABEL_AI,), [0.9]),
     ]
 
-    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with patch(
-            "sulku.http.sentencize",
+            "sulku.prediction.sentencize",
             side_effect=[
                 ["Short paragraph."],
                 [
@@ -188,7 +199,7 @@ def test_classify_text_markdown_too_short():
     """Test AI detection text classification endpoint with markdown that becomes too short after stripping."""
     mock_model = MagicMock()
     # Patch fasttext.load_model
-    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with TestClient(create_app()) as client:
             markdown_content = (
                 "---\ntitle: A very long frontmatter title here\n---\nshort"
@@ -214,17 +225,17 @@ def test_classify_text_binary_rejected():
         assert "binary" in response.json()["detail"].lower()
 
 
-def test_classify_text_weighted_sentence_aggregation():
-    """Test model score uses sentence-level word-count weighting inside a paragraph."""
+def test_classify_text_weighted_sentence_aggregation_smoothed():
+    """Test model score uses sentence-level word-count weighting with default HMM smoothing."""
     mock_model = MagicMock()
     mock_model.predict.side_effect = [
         ((LABEL_AI,), [0.1]),
         ((LABEL_AI,), [0.9]),
     ]
 
-    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with patch(
-            "sulku.http.sentencize",
+            "sulku.prediction.sentencize",
             side_effect=[
                 [
                     "Thank you!",
@@ -242,6 +253,71 @@ def test_classify_text_weighted_sentence_aggregation():
 
                 assert response.status_code == 200
                 final_score = response.json()["final_score"]
-                # Expected sentence-weighted score for the single paragraph:
-                # (0.1*2 + 0.9*11) / (2+11) = 0.7769230769...
-                assert abs(final_score - 0.7769230769) < 1e-6
+                # Under HMM smoothing, the scores are smoothed and move towards each other:
+                # 0.1 -> ~0.2826, 0.9 -> ~0.7174, weighted average = 0.65050167...
+                assert abs(final_score - 0.6505016722408027) < 1e-6
+
+
+def test_classify_text_weighted_sentence_aggregation_unsmoothed():
+    """Test model score uses sentence-level word-count weighting without HMM smoothing (p_stay=0.5)."""
+    mock_model = MagicMock()
+    mock_model.predict.side_effect = [
+        ((LABEL_AI,), [0.1]),
+        ((LABEL_AI,), [0.9]),
+    ]
+
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
+        with patch(
+            "sulku.prediction.sentencize",
+            side_effect=[
+                [
+                    "Thank you!",
+                    "This is a much longer sentence that has exactly ten words.",
+                ],
+            ],
+        ):
+            with TestClient(create_app()) as client:
+                content = "Thank you! This is a much longer sentence that has exactly ten words."
+                response = client.post(
+                    "/api/v1/aidetect/?p_stay=0.5",
+                    content=content,
+                    headers={"Content-Type": "text/plain"},
+                )
+                assert response.status_code == 200
+                assert abs(response.json()["final_score"] - 0.7769230769) < 1e-6
+
+
+def test_forward_backward_smoothing():
+    """Test Forward-Backward HMM smoothing direct unit test."""
+    from sulku.prediction import forward_backward_smoothing
+
+    # Empty inputs
+    assert forward_backward_smoothing([], []) == ([], [])
+
+    # Single item sequence
+    p_ai, p_hum = forward_backward_smoothing([0.8], [0.2])
+    assert len(p_ai) == 1
+    assert abs(p_ai[0] - 0.8) < 1e-6
+    assert abs(p_hum[0] - 0.2) < 1e-6
+
+    # Symmetric behavior (p_stay = 0.5 is no-op)
+    raw_ai = [0.1, 0.9, 0.4]
+    raw_hum = [0.9, 0.1, 0.6]
+    smoothed_ai, smoothed_hum = forward_backward_smoothing(raw_ai, raw_hum, p_stay=0.5)
+    for r_ai, s_ai in zip(raw_ai, smoothed_ai):
+        assert abs(r_ai - s_ai) < 1e-6
+    for r_hum, s_hum in zip(raw_hum, smoothed_hum):
+        assert abs(r_hum - s_hum) < 1e-6
+
+    # Normalization property: probabilities must sum to 1.0
+    smoothed_ai, smoothed_hum = forward_backward_smoothing(
+        raw_ai, raw_hum, p_stay=0.8, alpha=1.2
+    )
+    for ai, hum in zip(smoothed_ai, smoothed_hum):
+        assert abs(ai + hum - 1.0) < 1e-6
+
+    # Influence of neighbors: a low AI score surrounded by high AI scores should pull up
+    raw_ai = [0.9, 0.1, 0.9]
+    raw_hum = [0.1, 0.9, 0.1]
+    smoothed_ai, _ = forward_backward_smoothing(raw_ai, raw_hum, p_stay=0.85, alpha=1.0)
+    assert smoothed_ai[1] > 0.1  # pulled up by neighbors

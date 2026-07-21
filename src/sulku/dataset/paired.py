@@ -383,5 +383,5 @@ def generate_fasttext_sentence_data(
             for sentence in sentences:
                 sentence_cleaned = " ".join(sentence.split())
                 if count_words(sentence_cleaned) >= min_word_count:
-                    f.write(f"__label__{label} {sentence_cleaned}\n")
+                    f.write(f"{label} {sentence_cleaned}\n")
 

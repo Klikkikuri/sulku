@@ -28,3 +28,7 @@ LABEL_HUMAN = "__label__human"
 MODEL_PATHS = {
     "gemini-3.1-flash-lite": DATA_DIR / "models" / "gemini-3.1-flash-lite.ftz",
 }
+
+# HMM smoothing defaults
+DEFAULT_P_STAY = 0.85
+DEFAULT_ALPHA = 1.0
