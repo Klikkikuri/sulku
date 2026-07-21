@@ -95,7 +95,7 @@ def test_classify_text_markdown_success():
             assert response.status_code == 200
             # Ensure model.predict was called with normalized plain text (no markdown markers/newlines/frontmatter).
             expected_content = "Heading This is the actual content that will be analyzed."
-            mock_model.predict.assert_called_once_with(expected_content, k=1)
+            mock_model.predict.assert_called_once_with(expected_content, k=2)
 
 
 def test_classify_text_raw_markdown_success():
@@ -121,7 +121,7 @@ def test_classify_text_raw_markdown_success():
             )
             assert response.status_code == 200
             expected_content = "Heading This is the actual content that will be analyzed."
-            mock_model.predict.assert_called_once_with(expected_content, k=1)
+            mock_model.predict.assert_called_once_with(expected_content, k=2)
 
 
 def test_classify_text_multiline_paragraphs_scored_per_paragraph():
@@ -142,8 +142,8 @@ def test_classify_text_multiline_paragraphs_scored_per_paragraph():
                 headers={"Content-Type": "text/plain"},
             )
             assert response.status_code == 200
-            assert response.json()["final_score"] == 0.9
-            assert mock_model.predict.call_count == 3
+            assert abs(response.json()["final_score"] - 0.9) < 1e-6
+            assert mock_model.predict.call_count == 2
             for call in mock_model.predict.call_args_list:
                 assert "\n" not in call.args[0]
 

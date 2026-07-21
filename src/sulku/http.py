@@ -10,7 +10,7 @@ import yaml
 
 # import fasttext
 from sulku.wpapi import wpapi_router
-from .constants import LABEL_AI, MODEL_PATHS
+from .constants import LABEL_AI, LABEL_HUMAN, MODEL_PATHS
 from sulku.utils import sentencize, strip_markdown
 
 # Monkey-patch fasttext for NumPy 2.x compatibility
@@ -163,27 +163,40 @@ def _score_model(
     model: fasttext.FastText._FastText,
     paragraph_sentences: list[list[str]],
 ) -> tuple[str, float, list[float]]:
-    """
-    Score one model against paragraph->sentence inputs.
+    """Score one model against paragraph->sentence inputs.
 
-    Returns model name, final model score, and per-paragraph scores.
+    Confidence is calculated as the margin between the AI and human probabilities.
+
+    :param model_name: Name of the fastText model.
+    :param model: Loaded fastText model.
+    :param paragraph_sentences: Grouped sentence strings per paragraph.
+    :return: A tuple of (model_name, final_score, paragraph_scores).
     """
+    multi_sentence_paragraphs = [sentences for sentences in paragraph_sentences if len(sentences) > 1]
+    filtered_paragraphs = multi_sentence_paragraphs if multi_sentence_paragraphs else paragraph_sentences
+
     paragraph_scores: list[float] = []
     paragraph_weights: list[float] = []
 
-    for sentences in paragraph_sentences:
+    for sentences in filtered_paragraphs:
         sentence_scores: list[float] = []
         paragraph_word_count = sum(len(sentence.split()) for sentence in sentences)
 
         for sentence in sentences:
-            labels, probabilities = model.predict(sentence, k=1)
+            labels, probabilities = model.predict(sentence, k=2)
             if not labels or len(probabilities) == 0:
                 continue
 
-            label = labels[0]
+            prob_ai = 0.0
+            prob_human = 0.0
+            for label, prob in zip(labels, probabilities):
+                if label == LABEL_AI:
+                    prob_ai = float(prob)
+                elif label == LABEL_HUMAN:
+                    prob_human = float(prob)
 
-            prob = float(probabilities[0])
-            sentence_scores.append(prob if label == LABEL_AI else 1.0 - prob)
+            confidence = prob_ai - prob_human
+            sentence_scores.append(confidence)
 
         if not sentence_scores:
             continue
