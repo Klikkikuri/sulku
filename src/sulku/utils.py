@@ -71,15 +71,56 @@ def strip_markdown(text: str | None) -> str:
     text = re.sub(r"^[ \t]*\d+\.[ \t]+", "", text, flags=re.MULTILINE)
 
     # 13. Remove horizontal rules
-    text = re.sub(
-        r"^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$", "", text, flags=re.MULTILINE
-    )
+    text = re.sub(r"^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$", "", text, flags=re.MULTILINE)
 
     # Replace pipes (tables) and backslashes (escaping)
     text = text.replace("|", " ")
     text = re.sub(r"\\(.)", r"\1", text)
 
     return text
+
+
+def is_markdown(text: str | None) -> bool:
+    """
+    Detect if the text is markdown formatted.
+
+    :param text: The text string to check.
+    :type text: str | None
+    :return: True if the text contains markdown indicators, False otherwise.
+    :rtype: bool
+    """
+    if not text:
+        return False
+
+    # 1. YAML front matter
+    if text.startswith("---"):
+        return True
+
+    # 2. Markdown headers (e.g., # Header)
+    if re.search(r"^#{1,6}\s+", text, flags=re.MULTILINE):
+        return True
+
+    # 3. Fenced code blocks
+    if "```" in text or "~~~" in text:
+        return True
+
+    # 4. Links and images
+    if re.search(r"!\[.*?\]\(.*?\)|\[.*?\]\(.*?\)", text):
+        return True
+
+    # 5. List items
+    if re.search(r"^\s*[*+-]\s+", text, flags=re.MULTILINE):
+        return True
+
+    # 6. Blockquotes
+    if re.search(r"^\s*>\s+", text, flags=re.MULTILINE):
+        return True
+
+    # 7. Bold/italic/strikethrough markers
+    if "**" in text or "__" in text or "~~" in text:
+        return True
+
+    return False
 
 
 def count_words(text: str | None) -> int:

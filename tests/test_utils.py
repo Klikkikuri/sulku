@@ -6,7 +6,7 @@ Tests the strip_markdown and count_words helper functions under various
 formatting and structure styles, ensuring correct output and count.
 """
 
-from sulku.utils import count_words, sentencize, strip_markdown
+from sulku.utils import count_words, sentencize, strip_markdown, is_markdown
 
 
 def test_strip_markdown_none_and_empty():
@@ -128,3 +128,20 @@ def test_sentencize_abbreviations():
     assert len(res) == 2
     assert res[0].startswith("Matti")
     assert res[1].startswith("Pekka")
+
+
+def test_is_markdown_detection():
+    """Test that is_markdown correctly identifies markdown formats."""
+    # Plain text should not be detected as markdown
+    assert is_markdown("This is a simple plain text string.") is False
+    assert is_markdown(None) is False
+    assert is_markdown("") is False
+
+    # Markdown indicators should be detected
+    assert is_markdown("---\nlayout: post\n---\nHello") is True  # Front matter
+    assert is_markdown("# Heading 1\nSome text") is True  # Header
+    assert is_markdown("Here is a [link](http://example.com)") is True  # Link
+    assert is_markdown("List item:\n* item 1") is True  # List item
+    assert is_markdown("Code block:\n```python\nprint(1)\n```") is True  # Code block
+    assert is_markdown("> This is a blockquote.") is True  # Blockquote
+    assert is_markdown("This has **bold** text.") is True  # Bold

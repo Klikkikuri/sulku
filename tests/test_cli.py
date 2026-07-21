@@ -64,21 +64,15 @@ def test_cli_sample_with_filtering():
 
         # art1: fi, 60 words
         art1 = tmp_path / "art1.md"
-        art1.write_text(
-            "---\nlanguage: fi\n---\n" + " ".join(["sana"] * 60), encoding="utf-8"
-        )
+        art1.write_text("---\nlanguage: fi\n---\n" + " ".join(["sana"] * 60), encoding="utf-8")
 
         # art2: sv, 120 words
         art2 = tmp_path / "art2.md"
-        art2.write_text(
-            "---\nlang: sv\n---\n" + " ".join(["ord"] * 120), encoding="utf-8"
-        )
+        art2.write_text("---\nlang: sv\n---\n" + " ".join(["ord"] * 120), encoding="utf-8")
 
         # art3: fi, 5 words
         art3 = tmp_path / "art3.md"
-        art3.write_text(
-            "---\nlanguage: fi\n---\n" + " ".join(["sana"] * 5), encoding="utf-8"
-        )
+        art3.write_text("---\nlanguage: fi\n---\n" + " ".join(["sana"] * 5), encoding="utf-8")
 
         runner = CliRunner()
 
@@ -90,9 +84,7 @@ def test_cli_sample_with_filtering():
         assert Path(paths[0]).name == "art2.md"
 
         # 2. Filter by language 'fi' and min-words 50
-        result = runner.invoke(
-            main, ["sample", str(tmp_path), "-n", "1", "-l", "fi", "-mw", "50"]
-        )
+        result = runner.invoke(main, ["sample", str(tmp_path), "-n", "1", "-l", "fi", "-mw", "50"])
         assert result.exit_code == 0
         paths = result.output.strip().splitlines()
         assert len(paths) == 1
@@ -122,20 +114,13 @@ def test_cli_generate_synthetic_success(mock_generator_class):
         )
 
         assert result.exit_code == 0
-        assert (
-            "Sampling 2 articles and generating synthetic articles using model 'test-model'..."
-            in result.output
-        )
+        assert "Sampling 2 articles and generating synthetic articles using model 'test-model'..." in result.output
         assert "Successfully generated 2 synthetic articles:" in result.output
         assert "- /dummy/out1.md" in result.output
         assert "- /dummy/out2.md" in result.output
 
-        mock_generator_class.assert_called_once_with(
-            source_dir=Path(tmpdir), model_name="test-model"
-        )
-        mock_generator.generate.assert_called_once_with(
-            n_samples=2, seed=100, dest_dir=None, force=False, min_words=50
-        )
+        mock_generator_class.assert_called_once_with(source_dir=Path(tmpdir), model_name="test-model")
+        mock_generator.generate.assert_called_once_with(n_samples=2, seed=100, dest_dir=None, force=False, min_words=50)
 
 
 @patch("sulku.cli.SyntheticDatasetGenerator")
@@ -155,9 +140,7 @@ def test_cli_generate_synthetic_force(mock_generator_class):
         )
 
         assert result.exit_code == 0
-        mock_generator.generate.assert_called_once_with(
-            n_samples=1, seed=None, dest_dir=None, force=True, min_words=50
-        )
+        mock_generator.generate.assert_called_once_with(n_samples=1, seed=None, dest_dir=None, force=True, min_words=50)
 
 
 @patch("logging.basicConfig")
@@ -192,9 +175,7 @@ def test_cli_logging_debug_shorthand(mock_basic_config, temp_dataset):
 def test_cli_logging_custom_level(mock_basic_config, temp_dataset):
     """Test that --log-level option configures logging with the requested level."""
     runner = CliRunner()
-    result = runner.invoke(
-        main, ["--log-level", "ERROR", "sample", str(temp_dataset), "-n", "1"]
-    )
+    result = runner.invoke(main, ["--log-level", "ERROR", "sample", str(temp_dataset), "-n", "1"])
     assert result.exit_code == 0
     assert mock_basic_config.call_count == 1
     kwargs = mock_basic_config.call_args[1]
@@ -264,3 +245,109 @@ def test_cli_generate_fasttext(temp_dataset):
         assert len(lines) > 0
         assert all(line.startswith("__label__human ") for line in lines)
 
+
+@patch("uvicorn.run")
+def test_cli_serve_defaults(mock_uvicorn_run):
+    """Test that the serve command invokes uvicorn with default parameters."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["serve"])
+
+    assert result.exit_code == 0
+    assert "Starting server on 127.0.0.1:8000 (reload=False)..." in result.output
+    mock_uvicorn_run.assert_called_once_with(
+        "sulku.http:create_app",
+        host="127.0.0.1",
+        port=8000,
+        reload=False,
+        factory=True,
+    )
+
+
+@patch("uvicorn.run")
+def test_cli_serve_custom(mock_uvicorn_run):
+    """Test that the serve command invokes uvicorn with custom host, port, and reload flags."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["serve", "--host", "0.0.0.0", "--port", "9000", "--reload"])
+
+    assert result.exit_code == 0
+    assert "Starting server on 0.0.0.0:9000 (reload=True)..." in result.output
+    mock_uvicorn_run.assert_called_once_with(
+        "sulku.http:create_app",
+        host="0.0.0.0",
+        port=9000,
+        reload=True,
+        factory=True,
+    )
+
+
+@patch("uvicorn.run")
+def test_cli_serve_exception(mock_uvicorn_run):
+    """Test serve command error handling when uvicorn fails to start."""
+    mock_uvicorn_run.side_effect = RuntimeError("Could not bind to port")
+    runner = CliRunner()
+    result = runner.invoke(main, ["serve"])
+
+    assert result.exit_code != 0
+    assert "Error starting server: Could not bind to port" in result.output
+
+
+@patch("httpx.post")
+def test_cli_detect_success(mock_post):
+    """Test successful execution of the detect command."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "is_ai": False,
+        "ai_votes": 1,
+        "total_models": 1,
+        "predictions": {"gemini-3.1-flash-lite": 0.85},
+    }
+    mock_post.return_value = mock_response
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_file = Path(tmpdir) / "test.txt"
+        test_file.write_text("This is some sample text to analyze.", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["detect", str(test_file)])
+
+        assert result.exit_code == 0
+        assert "Sending" in result.output
+        assert "AI-Generated: False" in result.output
+        assert "Votes: 1/1" in result.output
+        mock_post.assert_called_once_with(
+            "http://127.0.0.1:8000/api/v1/aidetect/",
+            content="This is some sample text to analyze.",
+            headers={"Content-Type": "text/plain"},
+            timeout=15.0,
+        )
+
+
+@patch("httpx.post")
+def test_cli_detect_markdown_success(mock_post):
+    """Test successful execution of the detect command on a markdown file."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "is_ai": False,
+        "ai_votes": 1,
+        "total_models": 1,
+        "predictions": {"gemini-3.1-flash-lite": 0.85},
+    }
+    mock_post.return_value = mock_response
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_file = Path(tmpdir) / "test.md"
+        test_file.write_text("This is some sample text to analyze.", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["detect", str(test_file)])
+
+        assert result.exit_code == 0
+        assert "Sending" in result.output
+        mock_post.assert_called_once_with(
+            "http://127.0.0.1:8000/api/v1/aidetect/",
+            content="This is some sample text to analyze.",
+            headers={"Content-Type": "text/markdown"},
+            timeout=15.0,
+        )
