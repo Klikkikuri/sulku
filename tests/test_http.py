@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
+from sulku.constants import LABEL_AI
 from sulku.http import create_app
 
 
@@ -14,7 +15,7 @@ def test_health_check():
 def test_classify_text_success():
     """Test AI detection text classification endpoint with mocked fastText models."""
     mock_model = MagicMock()
-    mock_model.predict.return_value = (("__label__ai",), [0.85])
+    mock_model.predict.return_value = ((LABEL_AI,), [0.85])
 
     # Patch fasttext.load_model during TestClient context entry (lifespan)
     with patch("sulku.http.fasttext.load_model", return_value=mock_model):
@@ -73,7 +74,7 @@ def test_wikipedia_page_success(mock_get_page):
 def test_classify_text_markdown_success():
     """Test AI detection text classification endpoint with markdown containing frontmatter."""
     mock_model = MagicMock()
-    mock_model.predict.return_value = (("__label__ai",), [0.85])
+    mock_model.predict.return_value = ((LABEL_AI,), [0.85])
 
     # Patch fasttext.load_model during TestClient context entry (lifespan)
     with patch("sulku.http.fasttext.load_model", return_value=mock_model):
@@ -94,13 +95,13 @@ def test_classify_text_markdown_success():
             assert response.status_code == 200
             # Ensure model.predict was called with normalized plain text (no markdown markers/newlines/frontmatter).
             expected_content = "Heading This is the actual content that will be analyzed."
-            mock_model.predict.assert_called_once_with(expected_content)
+            mock_model.predict.assert_called_once_with(expected_content, k=1)
 
 
 def test_classify_text_raw_markdown_success():
     """Test AI detection text classification endpoint with raw markdown body."""
     mock_model = MagicMock()
-    mock_model.predict.return_value = (("__label__ai",), [0.85])
+    mock_model.predict.return_value = ((LABEL_AI,), [0.85])
 
     # Patch fasttext.load_model during TestClient context entry (lifespan)
     with patch("sulku.http.fasttext.load_model", return_value=mock_model):
@@ -120,13 +121,13 @@ def test_classify_text_raw_markdown_success():
             )
             assert response.status_code == 200
             expected_content = "Heading This is the actual content that will be analyzed."
-            mock_model.predict.assert_called_once_with(expected_content)
+            mock_model.predict.assert_called_once_with(expected_content, k=1)
 
 
 def test_classify_text_multiline_paragraphs_scored_per_paragraph():
     """Test multiline text is scored paragraph-by-paragraph without newline predict errors."""
     mock_model = MagicMock()
-    mock_model.predict.return_value = (("__label__ai",), [0.9])
+    mock_model.predict.return_value = ((LABEL_AI,), [0.9])
 
     with patch("sulku.http.fasttext.load_model", return_value=mock_model):
         with TestClient(create_app()) as client:
@@ -147,6 +148,36 @@ def test_classify_text_multiline_paragraphs_scored_per_paragraph():
                 assert "\n" not in call.args[0]
 
 
+def test_classify_text_weighted_paragraph_aggregation():
+    """Test model score uses paragraph word-count weighting."""
+    mock_model = MagicMock()
+    mock_model.predict.side_effect = [
+        ((LABEL_AI,), [0.1]),
+        ((LABEL_AI,), [0.9]),
+    ]
+
+    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+        with patch(
+            "sulku.http.sentencize",
+            side_effect=[
+                ["Short paragraph."],
+                ["This paragraph has many words and should dominate weighted aggregation."],
+            ],
+        ):
+            with TestClient(create_app()) as client:
+                content = "Para one.\n\nPara two."
+                response = client.post(
+                    "/api/v1/aidetect/",
+                    content=content,
+                    headers={"Content-Type": "text/plain"},
+                )
+
+                assert response.status_code == 200
+                final_score = response.json()["final_score"]
+                # Expected weighted score: (0.1*2 + 0.9*10) / (2+10) = 0.766666...
+                assert abs(final_score - 0.7666666667) < 1e-6
+
+
 def test_classify_text_markdown_too_short():
     """Test AI detection text classification endpoint with markdown that becomes too short after stripping."""
     mock_model = MagicMock()
@@ -161,6 +192,31 @@ def test_classify_text_markdown_too_short():
             )
             assert response.status_code == 422
             assert "too short" in response.json()["detail"]
+
+
+def test_classify_text_uses_frontmatter_language_for_sentencize():
+    """Test markdown frontmatter language is used as sentencize language."""
+    mock_model = MagicMock()
+    mock_model.predict.return_value = ((LABEL_AI,), [0.85])
+
+    with patch("sulku.http.fasttext.load_model", return_value=mock_model):
+        with patch("sulku.http.sentencize", return_value=["Sentence one."]) as mock_sentencize:
+            with TestClient(create_app()) as client:
+                markdown_content = (
+                    "---\n"
+                    "title: Test Markdown\n"
+                    "language: en\n"
+                    "---\n"
+                    "This is the actual content that will be analyzed."
+                )
+                response = client.post(
+                    "/api/v1/aidetect/",
+                    content=markdown_content,
+                    headers={"Content-Type": "text/markdown"},
+                )
+                assert response.status_code == 200
+                assert mock_sentencize.call_count >= 1
+                assert mock_sentencize.call_args.kwargs["lang"] == "en"
 
 
 def test_classify_text_binary_rejected():

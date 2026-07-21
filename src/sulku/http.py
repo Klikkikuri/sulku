@@ -1,14 +1,16 @@
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.concurrency import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import fasttext
 import logging
 import numpy as np
 from pydantic import BaseModel, Field
 import re
+import yaml
 
 # import fasttext
 from sulku.wpapi import wpapi_router
-from .constants import MODEL_PATHS
+from .constants import LABEL_AI, MODEL_PATHS
 from sulku.utils import sentencize, strip_markdown
 
 # Monkey-patch fasttext for NumPy 2.x compatibility
@@ -102,6 +104,38 @@ def _paragraph_sentences(text: str, lang: str = "fi") -> list[list[str]]:
     return paragraph_sentences
 
 
+def _extract_frontmatter_language(markdown_text: str) -> str | None:
+    """
+    Extract language from YAML front matter in markdown text.
+
+    Supports both 'language' and 'lang' keys.
+    """
+    if not markdown_text.startswith("---"):
+        return None
+
+    parts = markdown_text.split("---", 2)
+    if len(parts) < 3:
+        return None
+
+    yaml_part = parts[1].strip()
+    try:
+        parsed = yaml.safe_load(yaml_part)
+    except Exception:
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    for key in ("language", "lang"):
+        value = parsed.get(key)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized:
+                return normalized
+
+    return None
+
+
 def verify_plain_text(body_bytes: bytes) -> None:
     """
     Verify that the request body bytes represent plain text and not binary content.
@@ -124,6 +158,46 @@ def verify_plain_text(body_bytes: bytes) -> None:
         )
 
 
+def _score_model(
+    model_name: str,
+    model: fasttext.FastText._FastText,
+    paragraph_sentences: list[list[str]],
+) -> tuple[str, float, list[float]]:
+    """
+    Score one model against paragraph->sentence inputs.
+
+    Returns model name, final model score, and per-paragraph scores.
+    """
+    paragraph_scores: list[float] = []
+    paragraph_weights: list[float] = []
+
+    for sentences in paragraph_sentences:
+        sentence_scores: list[float] = []
+        paragraph_word_count = sum(len(sentence.split()) for sentence in sentences)
+
+        for sentence in sentences:
+            labels, probabilities = model.predict(sentence, k=1)
+            if not labels or len(probabilities) == 0:
+                continue
+
+            label = labels[0]
+
+            prob = float(probabilities[0])
+            sentence_scores.append(prob if label == LABEL_AI else 1.0 - prob)
+
+        if not sentence_scores:
+            continue
+
+        paragraph_scores.append(float(np.mean(sentence_scores)))
+        paragraph_weights.append(float(max(1, paragraph_word_count)))
+
+    if not paragraph_scores:
+        raise ValueError(f"Model '{model_name}' returned no predictions.")
+
+    model_score = float(np.average(paragraph_scores, weights=paragraph_weights))
+    return model_name, model_score, paragraph_scores
+
+
 @router.post("/", response_model=ClassificationResponse)
 async def classify_text(req: Request):
     if not models:
@@ -135,6 +209,7 @@ async def classify_text(req: Request):
     # Read raw body bytes to verify content
     body_bytes = await req.body()
     verify_plain_text(body_bytes)
+    sentencize_lang = "fi"
 
     is_markdown_content = False
 
@@ -157,6 +232,9 @@ async def classify_text(req: Request):
 
     # If it is markdown, strip formatting and frontmatter
     if is_markdown_content:
+        frontmatter_language = _extract_frontmatter_language(text)
+        if frontmatter_language:
+            sentencize_lang = frontmatter_language
         text = strip_markdown(text).strip()
         if len(text) < 10:
             raise HTTPException(
@@ -164,41 +242,30 @@ async def classify_text(req: Request):
                 detail="Text content is too short (less than 10 characters) after stripping markdown and frontmatter.",
             )
 
-    paragraph_sentences = _paragraph_sentences(text)
+    paragraph_sentences = _paragraph_sentences(text, lang=sentencize_lang)
     if not paragraph_sentences:
         raise HTTPException(status_code=422, detail="Text content does not contain classifiable paragraphs.")
 
     ai_votes = 0
     predictions = {}
 
-    # Process each paragraph through the ensemble by scoring each sentence first.
-    for name, model in models.items():
-        paragraph_scores: list[float] = []
+    # Score each model concurrently to reduce end-to-end latency.
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, len(models))) as executor:
+            futures = {
+                executor.submit(_score_model, name, model, paragraph_sentences): name for name, model in models.items()
+            }
+            model_results: list[tuple[str, float, list[float]]] = []
 
-        for idx, sentences in enumerate(paragraph_sentences, start=1):
-            sentence_scores: list[float] = []
+            for future in as_completed(futures):
+                model_results.append(future.result())
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-            for sentence in sentences:
-                # fastText predict returns: (('__label__ai',), array([0.895]))
-                labels, probabilities = model.predict(sentence)
-                if not labels or len(probabilities) == 0:
-                    continue
-
-                label = labels[0].replace("__label__", "")
-                prob = float(probabilities[0])
-                sentence_scores.append(prob if label == "ai" else 1.0 - prob)
-
-            if not sentence_scores:
-                continue
-
-            paragraph_score = float(np.mean(sentence_scores))
-            paragraph_scores.append(paragraph_score)
+    for name, model_score, paragraph_scores in sorted(model_results, key=lambda item: item[0]):
+        for idx, paragraph_score in enumerate(paragraph_scores, start=1):
             logger.info("model=%s paragraph=%d score=%.6f", name, idx, paragraph_score)
 
-        if not paragraph_scores:
-            raise HTTPException(status_code=500, detail=f"Model '{name}' returned no predictions.")
-
-        model_score = float(np.mean(paragraph_scores))
         predictions[name] = model_score
         logger.info("model=%s final_score=%.6f", name, model_score)
 

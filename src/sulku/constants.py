@@ -22,6 +22,9 @@ CACHE_SUBDIR = "summaries"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 SUMMARIZE_MODEL = "gemini-3.1-flash-lite"
 
+LABEL_AI = "__label__synthetic"
+LABEL_HUMAN = "__label__human"
+
 MODEL_PATHS = {
     "gemini-3.1-flash-lite": DATA_DIR / "models" / "gemini-3.1-flash-lite.ftz",
 }
