@@ -13,11 +13,12 @@ import json
 import logging
 import random
 from pathlib import Path
-from typing import Any, Optional, TypedDict, Union, cast
+from typing import Any, Optional, Union, cast
 
 import yaml
 from platformdirs import user_cache_dir
 
+from .models import GenerationDetailsDict, StyleVectorDict, TokenUsageDict
 from sulku.dataset.reader import DatasetItem, FileDataset, min_words_filter
 from sulku.summarize.llm import create_synthetic_article, summarize_text
 from sulku.summarize.models import ArticleSummary
@@ -31,36 +32,6 @@ from sulku.constants import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class TokenUsageDict(TypedDict):
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-
-
-class StyleVectorDict(TypedDict):
-    tone: str
-    perspective: str
-    angle: str
-    audience: list[str]
-    type: str
-
-
-class GenerationDetailsDict(TypedDict, total=False):
-    model: str
-    date: str
-    headline: str
-    summary: list[str]
-    style: StyleVectorDict
-    token_usage: TokenUsageDict
-
-
-class SyntheticFrontMatter(TypedDict, total=False):
-    id: str
-    language: str
-    title: str
-    generation_details: GenerationDetailsDict
 
 
 class SyntheticDatasetGenerator:

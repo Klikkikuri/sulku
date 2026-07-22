@@ -94,9 +94,7 @@ def test_classify_text_markdown_success():
             )
             assert response.status_code == 200
             # Ensure model.predict was called with normalized plain text (no markdown markers/newlines/frontmatter).
-            expected_content = (
-                "Heading This is the actual content that will be analyzed."
-            )
+            expected_content = "Heading This is the actual content that will be analyzed."
             mock_model.predict.assert_called_once_with(expected_content, k=2)
 
 
@@ -122,9 +120,7 @@ def test_classify_text_raw_markdown_success():
                 headers={"Content-Type": "text/markdown"},
             )
             assert response.status_code == 200
-            expected_content = (
-                "Heading This is the actual content that will be analyzed."
-            )
+            expected_content = "Heading This is the actual content that will be analyzed."
             mock_model.predict.assert_called_once_with(expected_content, k=2)
 
 
@@ -146,8 +142,10 @@ def test_classify_text_multiline_paragraphs_scored_per_paragraph():
                 headers={"Content-Type": "text/plain"},
             )
             assert response.status_code == 200
-            # Under HMM smoothing, the scores are smoothed and reinforce each other
-            assert abs(response.json()["final_score"] - 0.9696132596685083) < 1e-6
+            # Under HMM smoothing, the scores are smoothed and reinforce each other.
+            # Paragraph 1 has score 0.969613 (16 words), Paragraph 2 has score 0.9 (12 words).
+            # Weighted average: (0.9696132596685083 * 16 + 0.9 * 12) / 28 = 0.9397790055248619
+            assert abs(response.json()["final_score"] - 0.9397790055248619) < 1e-6
 
             # With p_stay=0.5, HMM smoothing is a no-op and we get the raw 0.9 score
             response_unsmoothed = client.post(
@@ -158,7 +156,7 @@ def test_classify_text_multiline_paragraphs_scored_per_paragraph():
             assert response_unsmoothed.status_code == 200
             assert abs(response_unsmoothed.json()["final_score"] - 0.9) < 1e-6
 
-            assert mock_model.predict.call_count == 4
+            assert mock_model.predict.call_count == 6
             for call in mock_model.predict.call_args_list:
                 assert "\n" not in call.args[0]
 
@@ -172,27 +170,27 @@ def test_classify_text_weighted_paragraph_aggregation():
     ]
 
     with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
-        with patch(
-            "sulku.utils.sentencize",
-            side_effect=[
-                ["Short paragraph."],
-                [
-                    "This paragraph has many words and should dominate weighted aggregation."
+        # Patch DEFAULT_LONG_PARAGRAPH_WORDS to 1 so the short paragraph (2 words) isn't filtered out
+        with patch("sulku.prediction.DEFAULT_LONG_PARAGRAPH_WORDS", 1):
+            with patch(
+                "sulku.utils.sentencize",
+                side_effect=[
+                    ["Short paragraph."],
+                    ["This paragraph has many words and should dominate weighted aggregation."],
                 ],
-            ],
-        ):
-            with TestClient(create_app()) as client:
-                content = "Para one.\n\nPara two."
-                response = client.post(
-                    "/api/v1/aidetect/",
-                    content=content,
-                    headers={"Content-Type": "text/plain"},
-                )
+            ):
+                with TestClient(create_app()) as client:
+                    content = "Para one.\n\nPara two."
+                    response = client.post(
+                        "/api/v1/aidetect/",
+                        content=content,
+                        headers={"Content-Type": "text/plain"},
+                    )
 
-                assert response.status_code == 200
-                final_score = response.json()["final_score"]
-                # Expected weighted score: (0.1*2 + 0.9*10) / (2+10) = 0.766666...
-                assert abs(final_score - 0.7666666667) < 1e-6
+                    assert response.status_code == 200
+                    final_score = response.json()["final_score"]
+                    # Expected weighted score: (0.1*2 + 0.9*10) / (2+10) = 0.766666...
+                    assert abs(final_score - 0.7666666667) < 1e-6
 
 
 def test_classify_text_markdown_too_short():
@@ -201,9 +199,7 @@ def test_classify_text_markdown_too_short():
     # Patch fasttext.load_model
     with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with TestClient(create_app()) as client:
-            markdown_content = (
-                "---\ntitle: A very long frontmatter title here\n---\nshort"
-            )
+            markdown_content = "---\ntitle: A very long frontmatter title here\n---\nshort"
             response = client.post(
                 "/api/v1/aidetect/",
                 content=markdown_content,
@@ -310,9 +306,7 @@ def test_forward_backward_smoothing():
         assert abs(r_hum - s_hum) < 1e-6
 
     # Normalization property: probabilities must sum to 1.0
-    smoothed_ai, smoothed_hum = forward_backward_smoothing(
-        raw_ai, raw_hum, p_stay=0.8, alpha=1.2
-    )
+    smoothed_ai, smoothed_hum = forward_backward_smoothing(raw_ai, raw_hum, p_stay=0.8, alpha=1.2)
     for ai, hum in zip(smoothed_ai, smoothed_hum):
         assert abs(ai + hum - 1.0) < 1e-6
 
@@ -351,8 +345,7 @@ def test_classify_text_per_paragraph_details():
 
             # Paragraph 1 should be classified (has > 1 sentences)
             assert paragraphs[0]["text"] == (
-                "This is the first sentence of paragraph one.\n"
-                "This is the second sentence of paragraph one."
+                "This is the first sentence of paragraph one.\n" "This is the second sentence of paragraph one."
             )
             assert paragraphs[0]["sentences"] == [
                 "This is the first sentence of paragraph one.",
@@ -382,5 +375,3 @@ def test_classify_text_per_paragraph_details():
             assert "gemini-3.1-flash-lite" in paragraphs[2]["predictions"]
             assert abs(paragraphs[2]["predictions"]["gemini-3.1-flash-lite"] - 0.8) < 1e-6
             assert abs(paragraphs[2]["final_score"] - 0.8) < 1e-6
-
-
