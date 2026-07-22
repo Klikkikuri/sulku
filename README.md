@@ -3,7 +3,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
 [![Project](https://img.shields.io/badge/part%20of-Klikkikuri-orange.svg)](https://github.com/Klikkikuri)
 
-**Sulku** (Finnish for *gate* or *closure*) is the text classification, synthetic dataset generation, and AI-detection pipeline of the **[Klikkikuri](https://github.com/Klikkikuri)** project. Klikkikuri is an open-source initiative and browser extension designed to detect and correct sensation-seeking clickbait headlines. Sulku supports this mission by providing robust tools to identify machine-generated (synthetic) text, build synthetic training corpora, and verify content authenticity.
+**Sulku** is the text classification, synthetic dataset generation, and AI-detection pipeline of the **[Klikkikuri](https://github.com/Klikkikuri)** project. Klikkikuri is an open-source initiative and browser extension designed to detect and correct sensation-seeking clickbait headlines. Sulku supports this mission by providing robust tools to identify machine-generated (synthetic) text, build synthetic training corpora, and verify content authenticity.
 
 > [!IMPORTANT]
 > Sulku is **not** designed or intended to be a foolproof AI detection system.
