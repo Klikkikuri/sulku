@@ -360,3 +360,67 @@ def test_cli_detect_markdown_success(mock_post):
             headers={"Content-Type": "text/markdown"},
             timeout=15.0,
         )
+
+
+@patch("httpx.post")
+@patch("trafilatura.extract")
+@patch("trafilatura.fetch_url")
+def test_cli_detect_url_success(mock_fetch_url, mock_extract, mock_post):
+    """Test successful execution of the detect command when given a URL."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "is_ai": False,
+        "ai_votes": 1,
+        "total_models": 1,
+        "final_score": 0.85,
+        "final_confidence": 0.70,
+        "predictions": {"gemini-3.1-flash-lite": 0.85},
+        "confidences": {"gemini-3.1-flash-lite": 0.70},
+    }
+    mock_post.return_value = mock_response
+    mock_fetch_url.return_value = "<html><body>Some content</body></html>"
+    mock_extract.return_value = "Extracted content from URL"
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["detect", "https://example.com/page"])
+
+    assert result.exit_code == 0
+    assert "Fetching content from https://example.com/page..." in result.output
+    assert "Sending https://example.com/page to aidetect service" in result.output
+    assert "AI-Generated: False" in result.output
+    mock_fetch_url.assert_called_once_with("https://example.com/page")
+    mock_extract.assert_called_once_with("<html><body>Some content</body></html>", output_format="markdown")
+    mock_post.assert_called_once_with(
+        "http://127.0.0.1:8000/api/v1/aidetect/",
+        content="Extracted content from URL",
+        headers={"Content-Type": "text/markdown"},
+        timeout=15.0,
+    )
+
+
+@patch("trafilatura.fetch_url")
+def test_cli_detect_url_fetch_failure(mock_fetch_url):
+    """Test detect command behavior when URL fetching fails."""
+    mock_fetch_url.return_value = None
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["detect", "https://example.com/bad-page"])
+
+    assert result.exit_code != 0
+    assert "Error: Failed to fetch content from URL https://example.com/bad-page" in result.output
+
+
+@patch("trafilatura.extract")
+@patch("trafilatura.fetch_url")
+def test_cli_detect_url_extract_failure(mock_fetch_url, mock_extract):
+    """Test detect command behavior when markdown extraction from fetched content fails."""
+    mock_fetch_url.return_value = "<html></html>"
+    mock_extract.return_value = None
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["detect", "https://example.com/empty-page"])
+
+    assert result.exit_code != 0
+    assert "Error: Failed to extract markdown content from URL https://example.com/empty-page" in result.output
+
