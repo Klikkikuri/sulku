@@ -383,5 +383,6 @@ def generate_fasttext_sentence_data(
             for sentence in sentences:
                 sentence_cleaned = " ".join(sentence.split())
                 if count_words(sentence_cleaned) >= min_word_count:
-                    f.write(f"{label} {sentence_cleaned}\n")
+                    fasttext_label = label if label.startswith("__label__") else f"__label__{label}"
+                    f.write(f"{fasttext_label} {sentence_cleaned}\n")
 

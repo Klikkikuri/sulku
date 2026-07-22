@@ -96,7 +96,7 @@ def test_cli_sample_with_filtering():
         assert "Error: No files found matching pattern" in result.output
 
 
-@patch("sulku.cli.SyntheticDatasetGenerator")
+@patch("sulku.cli.generate_synthetic.SyntheticDatasetGenerator")
 def test_cli_generate_synthetic_success(mock_generator_class):
     """Test successful CLI execution for generate-synthetic command."""
     mock_generator = MagicMock()
@@ -123,7 +123,7 @@ def test_cli_generate_synthetic_success(mock_generator_class):
         mock_generator.generate.assert_called_once_with(n_samples=2, seed=100, dest_dir=None, force=False, min_words=50)
 
 
-@patch("sulku.cli.SyntheticDatasetGenerator")
+@patch("sulku.cli.generate_synthetic.SyntheticDatasetGenerator")
 def test_cli_generate_synthetic_force(mock_generator_class):
     """Test CLI execution for generate-synthetic command with --force flag."""
     mock_generator = MagicMock()
