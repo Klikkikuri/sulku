@@ -89,7 +89,7 @@ Watch now at [Yle Areena](https://areena.yle.fi/1-307177).
    ```
 
 2. **Configure Environment Variables**:
-   Create a `.env` file in the root directory, with either your OpenAI API key or Gemini API key. Using the OpenAI client library environment variable overrides are supported.
+   Create a `.env` file in the app root `/app` -directory, with either your OpenAI API key or Gemini API key. Using the OpenAI client library environment variable overrides are supported.
    ```env
    OPENAI_API_KEY=your-openai-key
    GEMINI_API_KEY=your-gemini-key
