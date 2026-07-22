@@ -130,6 +130,17 @@ def print_detection_result(display_name: str, result: dict) -> None:
         else:
             click.echo(f"    - {name}: {score:.4f} (confidence: {model_confidence:.4f})")
 
+    if "paragraphs" in result:
+        click.echo("  Paragraphs:")
+        for idx, para in enumerate(result["paragraphs"], start=1):
+            snippet = para["text"].replace("\n", " ")
+            if len(snippet) > 60:
+                snippet = snippet[:57] + "..."
+            
+            score_str = f"{para['final_score']:.4f}" if para["final_score"] is not None else "Excluded"
+            click.echo(f"    - Paragraph {idx} ({len(para['sentences'])} sentences): score: {score_str} | \"{snippet}\"")
+
+
 
 @click.command(name="detect")
 @click.argument("path_or_url", type=str)

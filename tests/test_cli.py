@@ -304,6 +304,14 @@ def test_cli_detect_success(mock_post):
         "final_confidence": 0.70,
         "predictions": {"gemini-3.1-flash-lite": 0.85},
         "confidences": {"gemini-3.1-flash-lite": 0.70},
+        "paragraphs": [
+            {
+                "text": "This is some sample text to analyze.",
+                "sentences": ["This is some sample text to analyze."],
+                "predictions": {"gemini-3.1-flash-lite": 0.85},
+                "final_score": 0.85,
+            }
+        ],
     }
     mock_post.return_value = mock_response
 
@@ -321,6 +329,8 @@ def test_cli_detect_success(mock_post):
         assert "Final Score: 0.8500" in result.output
         assert "Final Confidence: 0.7000" in result.output
         assert "gemini-3.1-flash-lite: 0.8500 (confidence: 0.7000)" in result.output
+        assert "Paragraphs:" in result.output
+        assert "Paragraph 1 (1 sentences): score: 0.8500 | \"This is some sample text to analyze.\"" in result.output
         mock_post.assert_called_once_with(
             "http://127.0.0.1:8000/api/v1/aidetect/",
             content="This is some sample text to analyze.",

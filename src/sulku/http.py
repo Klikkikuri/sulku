@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sulku.wpapi import wpapi_router
 from .constants import DEFAULT_ALPHA, DEFAULT_P_STAY
 from sulku.prediction import prediction_service
-from sulku.utils import strip_markdown
+from sulku.utils import parse_paragraphs_and_sentences, strip_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,17 @@ class ClassificationRequest(BaseModel):
     )
 
 
+class ParagraphDetailResponse(BaseModel):
+    text: str = Field(..., description="The raw/trimmed text of the paragraph.")
+    sentences: list[str] = Field(..., description="The list of sentences in the paragraph.")
+    predictions: dict[str, float] | None = Field(
+        None, description="Prediction score per model for this paragraph, or null if excluded."
+    )
+    final_score: float | None = Field(
+        None, description="The ensemble average score for this paragraph, or null if excluded."
+    )
+
+
 class ClassificationResponse(BaseModel):
     is_ai: bool
     ai_votes: int
@@ -45,6 +56,10 @@ class ClassificationResponse(BaseModel):
     final_confidence: float
     predictions: dict[str, float]
     confidences: dict[str, float]
+    paragraphs: list[ParagraphDetailResponse] = Field(
+        ..., description="Per-paragraph predictions and metadata."
+    )
+
 
 
 router = APIRouter(prefix="/api/v1/aidetect", tags=["classification"])
@@ -123,8 +138,24 @@ async def classify_text(
                        "after stripping markdown and frontmatter.",
             )
 
+    # Parse text into paragraphs and sentences first
     try:
-        res = prediction_service.classify(text, p_stay=p_stay, alpha=alpha)
+        parsed_paragraphs = parse_paragraphs_and_sentences(text)
+    except Exception as exc:
+        logger.exception("Failed to parse text: %s", exc)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to parse text: {exc}",
+        )
+
+    if not parsed_paragraphs:
+        raise HTTPException(
+            status_code=422,
+            detail="Text content does not contain classifiable paragraphs.",
+        )
+
+    try:
+        res = prediction_service.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -138,7 +169,17 @@ async def classify_text(
         final_confidence=res.final_confidence,
         predictions=res.predictions,
         confidences=res.confidences,
+        paragraphs=[
+            ParagraphDetailResponse(
+                text=p.text,
+                sentences=p.sentences,
+                predictions=p.predictions,
+                final_score=p.final_score,
+            )
+            for p in res.paragraphs
+        ],
     )
+
 
 
 def create_app() -> FastAPI:

@@ -10,7 +10,6 @@ smoothing, and sentence/paragraph scoring.
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import logging
-import re
 from typing import Dict, List, Tuple
 
 import fasttext
@@ -22,11 +21,9 @@ from sulku.constants import (
     LABEL_AI,
     LABEL_HUMAN,
     MODEL_PATHS,
+    DEFAULT_LONG_PARAGRAPH_WORDS,
 )
-from sulku.utils import sentencize
-
-# NOTE: This module supports only Finnish sentence segmentation.
-SENTENCIZE_LANGUAGE = "fi"
+from sulku.utils import parse_paragraphs_and_sentences
 
 # Monkey-patch fasttext for NumPy 2.x compatibility
 _orig_predict = fasttext.FastText._FastText.predict
@@ -64,6 +61,16 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class ParagraphPredictionDetail:
+    """Dataclass holding predictions and metadata for a single paragraph."""
+
+    text: str
+    sentences: List[str]
+    predictions: Dict[str, float] | None
+    final_score: float | None
+
+
+@dataclass
 class EnsemblePredictionResult:
     """Dataclass holding the structured result of an ensemble classification."""
 
@@ -74,33 +81,7 @@ class EnsemblePredictionResult:
     final_confidence: float
     predictions: Dict[str, float]
     confidences: Dict[str, float]
-
-
-def _paragraph_sentences(text: str) -> List[List[str]]:
-    """Build paragraph-level sentence units from text.
-
-    Paragraphs are split by blank lines, then each paragraph is split into sentences.
-    Sentences are whitespace-normalized so each unit can be safely passed to fastText
-    without embedded newlines.
-    """
-    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
-    paragraph_sentences: List[List[str]] = []
-
-    for paragraph in raw_paragraphs:
-        sentences = [
-            " ".join(sentence.split())
-            for sentence in sentencize(paragraph, lang=SENTENCIZE_LANGUAGE)
-            if sentence.strip()
-        ]
-        if not sentences:
-            fallback = " ".join(paragraph.split())
-            if fallback:
-                sentences = [fallback]
-
-        if sentences:
-            paragraph_sentences.append(sentences)
-
-    return paragraph_sentences
+    paragraphs: List[ParagraphPredictionDetail]
 
 
 def forward_backward_smoothing(
@@ -183,8 +164,12 @@ def _score_model(
 
     Confidence is calculated as the margin between the AI and human probabilities.
     """
-    multi_sentence_paragraphs = [sentences for sentences in paragraph_sentences if len(sentences) > 1]
-    filtered_paragraphs = multi_sentence_paragraphs if multi_sentence_paragraphs else paragraph_sentences
+    # Keep paragraphs that have at least DEFAULT_LONG_PARAGRAPH_WORDS words in total
+    eligible_paragraphs = [
+        sentences for sentences in paragraph_sentences
+        if sum(len(s.split()) for s in sentences) >= DEFAULT_LONG_PARAGRAPH_WORDS
+    ]
+    filtered_paragraphs = eligible_paragraphs if eligible_paragraphs else paragraph_sentences
 
     paragraph_scores: List[float] = []
     paragraph_weights: List[float] = []
@@ -257,21 +242,27 @@ class PredictionService:
 
     def classify(
         self,
-        text: str,
+        text_or_paragraphs: str | List[Tuple[str, List[str]]],
         p_stay: float = DEFAULT_P_STAY,
         alpha: float = DEFAULT_ALPHA,
     ) -> EnsemblePredictionResult:
         """Classify a text document using the ensemble of loaded models.
 
-        Splits text into paragraphs/sentences, computes HMM-smoothed scores,
-        weights results by word counts, and votes.
+        Accepts either a raw text string or pre-parsed paragraphs/sentences.
+        Computes HMM-smoothed scores, weights results by word counts, and votes.
         """
         if not self.is_initialized:
             raise ValueError("Models not initialized.")
 
-        paragraph_sentences = _paragraph_sentences(text)
-        if not paragraph_sentences:
+        if isinstance(text_or_paragraphs, str):
+            parsed_paragraphs = parse_paragraphs_and_sentences(text_or_paragraphs)
+        else:
+            parsed_paragraphs = text_or_paragraphs
+
+        if not parsed_paragraphs:
             raise ValueError("Text content does not contain classifiable paragraphs.")
+
+        paragraph_sentences = [sentences for _, sentences in parsed_paragraphs]
 
         ai_votes = 0
         predictions = {}
@@ -316,6 +307,48 @@ class PredictionService:
         # Majority voting logic (e.g., flagged if 2 or more models agree)
         is_ai = ai_votes >= 2
 
+        # Map model paragraph-level predictions back to the original parsed paragraphs
+        eligible_indices = [
+            i for i, sentences in enumerate(paragraph_sentences)
+            if sum(len(s.split()) for s in sentences) >= DEFAULT_LONG_PARAGRAPH_WORDS
+        ]
+        if eligible_indices:
+            classified_indices = set(eligible_indices)
+        else:
+            classified_indices = set(range(len(paragraph_sentences)))
+
+        classified_indices_list = sorted(list(classified_indices))
+
+        paragraphs_details: List[ParagraphPredictionDetail] = []
+        for i, (para_text, sentences) in enumerate(parsed_paragraphs):
+            if i in classified_indices:
+                k = classified_indices_list.index(i)
+                # Map predictions per model for this paragraph
+                predictions_for_para = {}
+                for name, _, p_scores, _ in model_results:
+                    predictions_for_para[name] = p_scores[k]
+
+                # Calculate final_score as the mean of all models' predictions for this paragraph
+                final_score_for_para = float(np.mean(list(predictions_for_para.values())))
+
+                paragraphs_details.append(
+                    ParagraphPredictionDetail(
+                        text=para_text,
+                        sentences=sentences,
+                        predictions=predictions_for_para,
+                        final_score=final_score_for_para,
+                    )
+                )
+            else:
+                paragraphs_details.append(
+                    ParagraphPredictionDetail(
+                        text=para_text,
+                        sentences=sentences,
+                        predictions=None,
+                        final_score=None,
+                    )
+                )
+
         return EnsemblePredictionResult(
             is_ai=is_ai,
             ai_votes=ai_votes,
@@ -324,7 +357,10 @@ class PredictionService:
             final_confidence=final_confidence,
             predictions=predictions,
             confidences=confidences,
+            paragraphs=paragraphs_details,
         )
 
 
 prediction_service = PredictionService()
+
+

@@ -32,3 +32,7 @@ MODEL_PATHS = {
 # HMM smoothing defaults
 DEFAULT_P_STAY = 0.85
 DEFAULT_ALPHA = 1.0
+
+# Paragraph filtering defaults
+DEFAULT_LONG_PARAGRAPH_WORDS = 15
+

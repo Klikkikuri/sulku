@@ -137,7 +137,7 @@ def test_classify_text_multiline_paragraphs_scored_per_paragraph():
         with TestClient(create_app()) as client:
             content = (
                 "This is paragraph one with enough words to classify.\n"
-                "Still the first paragraph.\n\n"
+                "Still the first paragraph of the document.\n\n"
                 "This is paragraph two and it is also long enough for inference."
             )
             response = client.post(
@@ -173,7 +173,7 @@ def test_classify_text_weighted_paragraph_aggregation():
 
     with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with patch(
-            "sulku.prediction.sentencize",
+            "sulku.utils.sentencize",
             side_effect=[
                 ["Short paragraph."],
                 [
@@ -235,7 +235,7 @@ def test_classify_text_weighted_sentence_aggregation_smoothed():
 
     with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with patch(
-            "sulku.prediction.sentencize",
+            "sulku.utils.sentencize",
             side_effect=[
                 [
                     "Thank you!",
@@ -268,7 +268,7 @@ def test_classify_text_weighted_sentence_aggregation_unsmoothed():
 
     with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
         with patch(
-            "sulku.prediction.sentencize",
+            "sulku.utils.sentencize",
             side_effect=[
                 [
                     "Thank you!",
@@ -321,3 +321,66 @@ def test_forward_backward_smoothing():
     raw_hum = [0.1, 0.9, 0.1]
     smoothed_ai, _ = forward_backward_smoothing(raw_ai, raw_hum, p_stay=0.85, alpha=1.0)
     assert smoothed_ai[1] > 0.1  # pulled up by neighbors
+
+
+def test_classify_text_per_paragraph_details():
+    """Verify that per-paragraph details are returned correctly including predictions and final_score."""
+    mock_model = MagicMock()
+    mock_model.predict.return_value = ((LABEL_AI,), [0.8])
+
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
+        with TestClient(create_app()) as client:
+            content = (
+                "This is the first sentence of paragraph one.\n"
+                "This is the second sentence of paragraph one.\n\n"
+                "Single sentence paragraph two.\n\n"
+                "This is a very long single sentence paragraph that has more than "
+                "fifteen words in it to test that it is not excluded."
+            )
+            response = client.post(
+                "/api/v1/aidetect/?p_stay=0.5",
+                content=content,
+                headers={"Content-Type": "text/plain"},
+            )
+            assert response.status_code == 200
+            json_data = response.json()
+
+            assert "paragraphs" in json_data
+            paragraphs = json_data["paragraphs"]
+            assert len(paragraphs) == 3
+
+            # Paragraph 1 should be classified (has > 1 sentences)
+            assert paragraphs[0]["text"] == (
+                "This is the first sentence of paragraph one.\n"
+                "This is the second sentence of paragraph one."
+            )
+            assert paragraphs[0]["sentences"] == [
+                "This is the first sentence of paragraph one.",
+                "This is the second sentence of paragraph one.",
+            ]
+            assert paragraphs[0]["predictions"] is not None
+            assert "gemini-3.1-flash-lite" in paragraphs[0]["predictions"]
+            assert abs(paragraphs[0]["predictions"]["gemini-3.1-flash-lite"] - 0.8) < 1e-6
+            assert abs(paragraphs[0]["final_score"] - 0.8) < 1e-6
+
+            # Paragraph 2 should be excluded (only has 1 short sentence while Paragraph 1 has 2)
+            assert paragraphs[1]["text"] == "Single sentence paragraph two."
+            assert paragraphs[1]["sentences"] == ["Single sentence paragraph two."]
+            assert paragraphs[1]["predictions"] is None
+            assert paragraphs[1]["final_score"] is None
+
+            # Paragraph 3 should be classified (has 1 long sentence >= 15 words)
+            assert paragraphs[2]["text"] == (
+                "This is a very long single sentence paragraph that has more than "
+                "fifteen words in it to test that it is not excluded."
+            )
+            assert paragraphs[2]["sentences"] == [
+                "This is a very long single sentence paragraph that has more than "
+                "fifteen words in it to test that it is not excluded."
+            ]
+            assert paragraphs[2]["predictions"] is not None
+            assert "gemini-3.1-flash-lite" in paragraphs[2]["predictions"]
+            assert abs(paragraphs[2]["predictions"]["gemini-3.1-flash-lite"] - 0.8) < 1e-6
+            assert abs(paragraphs[2]["final_score"] - 0.8) < 1e-6
+
+

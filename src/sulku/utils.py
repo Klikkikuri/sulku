@@ -178,3 +178,39 @@ def sentencize(text: str | None, lang: str = "fi") -> list[str]:
 
         sentences = re.split(r"(?<=[.!?])\s+", text)
         return [s.strip() for s in sentences if s.strip()]
+
+
+def parse_paragraphs_and_sentences(text: str) -> list[tuple[str, list[str]]]:
+    """Parse text into paragraphs and sentences.
+
+    Paragraphs are split by blank lines, then each paragraph is split into sentences.
+    Sentences are whitespace-normalized.
+
+    :param text: The text to parse.
+    :type text: str
+    :return: A list of tuples containing (paragraph_text, sentence_list).
+    :rtype: list[tuple[str, list[str]]]
+    """
+    if not text:
+        return []
+    # Split paragraphs by blank lines
+    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
+    results: list[tuple[str, list[str]]] = []
+
+    for paragraph in raw_paragraphs:
+        # Split paragraph into sentences and normalize whitespace
+        sentences = [
+            " ".join(sentence.split())
+            for sentence in sentencize(paragraph, lang="fi")
+            if sentence.strip()
+        ]
+        if not sentences:
+            fallback = " ".join(paragraph.split())
+            if fallback:
+                sentences = [fallback]
+
+        if sentences:
+            results.append((paragraph, sentences))
+
+    return results
+
