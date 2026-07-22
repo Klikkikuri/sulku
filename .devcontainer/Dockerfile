@@ -65,7 +65,7 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package sulku
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+CMD [ "uv", "run", "sulku", "serve", "--host", "0.0.0.0", "--port", "8000" ]
 
 # Development stage
 
