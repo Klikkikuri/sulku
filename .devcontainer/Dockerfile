@@ -90,7 +90,17 @@ ENV VIRTUAL_ENV=$VIRTUAL_ENV \
     
 # Disable telemetry
 ENV HAYSTACK_TELEMETRY_ENABLED="False" \
-    ANONYMIZED_TELEMETRY="False"
+    ANONYMIZED_TELEMETRY="False" \
+    CODEGRAPH_TELEMETRY=0
+
+# Install nodejs and npm
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get --no-install-recommends install -y \
+        nodejs npm
+
+# Install codegraph CLI
+RUN npm install -g @colbymchenry/codegraph
 
 RUN echo "source ${VIRTUAL_ENV}/bin/activate" >> /etc/bash.bashrc
 
@@ -100,5 +110,3 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     chown -R vscode:vscode /app/.venv
 
 USER vscode
-
-RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
