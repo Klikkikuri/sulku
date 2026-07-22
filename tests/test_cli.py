@@ -434,3 +434,48 @@ def test_cli_detect_url_extract_failure(mock_fetch_url, mock_extract):
     assert result.exit_code != 0
     assert "Error: Failed to extract markdown content from URL https://example.com/empty-page" in result.output
 
+
+@patch("httpx.post")
+def test_cli_test_detect_success(mock_post):
+    """Test successful execution of the 'sulku test detect' command."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.side_effect = [
+        {"is_ai": False},  # First call (human file) -> correct (is_ai=False)
+        {"is_ai": True},   # Second call (synthetic file) -> correct (is_ai=True)
+    ]
+    mock_post.return_value = mock_response
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        
+        human_dir = tmp_path / "human"
+        human_dir.mkdir()
+        synthetic_dir = tmp_path / "synthetic"
+        synthetic_dir.mkdir()
+        
+        (human_dir / "human1.md").write_text("This is some human written content.", encoding="utf-8")
+        (synthetic_dir / "syn1.md").write_text("This is some synthetic written content.", encoding="utf-8")
+        
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "test",
+                "detect",
+                "--count", "1",
+                "--human-dir", str(human_dir),
+                "--synthetic-dir", str(synthetic_dir),
+                "--seed", "42",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Testing classification accuracy" in result.output
+        assert "human1.md -> Classified as Correct (HUMAN)" in result.output
+        assert "syn1.md -> Classified as Correct (AI)" in result.output
+        assert "DETECTION TEST RESULTS" in result.output
+        assert "Accuracy: 100.00%" in result.output
+        assert mock_post.call_count == 2
+
+

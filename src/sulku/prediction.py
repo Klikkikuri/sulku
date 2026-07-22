@@ -2,9 +2,18 @@
 Prediction and Inference
 ========================
 
-This module encapsulates all text classification and prediction logic,
-including fastText model loading, Numpy 2.x patching, HMM forward-backward
-smoothing, and sentence/paragraph scoring.
+This module encapsulates all text classification and prediction logic,including fastText model loading,
+Numpy 2.x patching, HMM forward-backward smoothing, and sentence/paragraph scoring.
+
+Detection Logic
+---------------
+Each loaded model is a specialist tuned to detect output from a particular AI generator (e.g. GPT-style, Claude-style,
+Llama-style). Because a specialist model is expected to score near its human baseline on text from a generator it wasn't
+trained on, a simple majority vote is unreliable.
+
+Instead, we convert model scores to Z-scores relative to human baselines, clip uninformative negative Z-scores, and
+combine them using Stouffer's method over a fixed denominator (sqrt(k)). This avoids selection bias while preventing
+mismatched specialists from diluting correct positive detections.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,12 +26,15 @@ import numpy as np
 
 from sulku.constants import (
     DEFAULT_ALPHA,
+    DEFAULT_HUMAN_MEAN,
+    DEFAULT_HUMAN_STD,
+    DEFAULT_LONG_PARAGRAPH_WORDS,
     DEFAULT_P_STAY,
+    DEFAULT_Z_THRESHOLD,
     LABEL_AI,
     LABEL_HUMAN,
+    MODEL_CALIBRATION,
     MODEL_PATHS,
-    DEFAULT_LONG_PARAGRAPH_WORDS,
-    HIGH_CONFIDENCE_THRESHOLD,
 )
 from sulku.utils import parse_paragraphs_and_sentences
 
@@ -80,8 +92,10 @@ class EnsemblePredictionResult:
     total_models: int
     final_score: float
     final_confidence: float
+    final_z_score: float
     predictions: Dict[str, float]
     confidences: Dict[str, float]
+    z_scores: Dict[str, float]
     paragraphs: List[ParagraphPredictionDetail]
 
 
@@ -250,7 +264,8 @@ class PredictionService:
         """Classify a text document using the ensemble of loaded models.
 
         Accepts either a raw text string or pre-parsed paragraphs/sentences.
-        Computes HMM-smoothed scores, weights results by word counts, and votes.
+        Computes HMM-smoothed scores, converts to Z-scores, clips negative Z-scores,
+        and combines scores using Stouffer's formula with a fixed denominator.
         """
         if not self.is_initialized:
             raise ValueError("Models not initialized.")
@@ -265,7 +280,6 @@ class PredictionService:
 
         paragraph_sentences = [sentences for _, sentences in parsed_paragraphs]
 
-        ai_votes = 0
         predictions = {}
         confidences = {}
 
@@ -296,23 +310,35 @@ class PredictionService:
             logger.info("model=%s final_score=%.6f", name, model_score)
             logger.info("model=%s confidence=%.6f", name, model_confidence)
 
-            # If the averaged paragraph score is above 0.5, register an AI vote.
-            if model_score > 0.5:
-                ai_votes += 1
+        # Convert predictions to Z-scores relative to human baselines
+        z_scores: Dict[str, float] = {}
+        clipped_z_sum = 0.0
 
+        for name, model_score in sorted(predictions.items()):
+            mean, std = MODEL_CALIBRATION.get(name, (DEFAULT_HUMAN_MEAN, DEFAULT_HUMAN_STD))
+            std_val = std if std > 1e-6 else 1e-6
+            z = (model_score - mean) / std_val
+            z_scores[name] = float(z)
+            # Clip negative z-scores to 0 (uninformative baseline readings)
+            clipped_z_sum += max(0.0, float(z))
+
+        total_models = max(1, len(self.models))
+        # Fixed denominator (sqrt(total_models)) prevents selection bias
+        final_z_score = float(clipped_z_sum / (total_models ** 0.5)) if predictions else 0.0
         final_score = float(np.mean(list(predictions.values()))) if predictions else 0.0
         final_confidence = float(np.mean(list(confidences.values()))) if confidences else 0.0
+        is_ai = final_z_score >= DEFAULT_Z_THRESHOLD
+        ai_votes = sum(1 for z in z_scores.values() if z > 0.0)
+
+        # TODO: Generalist Fallback Tier Design
+        # When no specialist model stands out (final_z_score < DEFAULT_Z_THRESHOLD), query a generalist model
+        # trained on pooled AI text across all known generators vs. human text instead of majority voting
+        # among mismatched specialists that failed to agree. If generalist_score >= GENERALIST_THRESHOLD,
+        # set is_ai = True with fallback_triggered = True.
+
+        logger.info("ensemble final_z_score=%.6f", final_z_score)
         logger.info("ensemble final_score=%.6f", final_score)
         logger.info("ensemble final_confidence=%.6f", final_confidence)
-
-        # If any model flags the text as AI with high confidence, it's enough to classify it as AI-generated.
-        # Otherwise, fall back to majority voting.
-        any_high_confidence = any(score >= HIGH_CONFIDENCE_THRESHOLD for score in predictions.values())
-        if any_high_confidence:
-            is_ai = True
-        else:
-            majority_threshold = (len(self.models) // 2) + 1
-            is_ai = ai_votes >= majority_threshold
 
         # Map model paragraph-level predictions back to the original parsed paragraphs
         eligible_indices = [
@@ -335,8 +361,7 @@ class PredictionService:
                 for name, _, p_scores, _ in model_results:
                     predictions_for_para[name] = p_scores[k]
 
-                # Calculate final_score as the mean of all models' predictions for this paragraph
-                final_score_for_para = float(np.mean(list(predictions_for_para.values())))
+                final_score_for_para = float(np.mean(list(predictions_for_para.values()))) if predictions_for_para else 0.0
 
                 paragraphs_details.append(
                     ParagraphPredictionDetail(
@@ -362,10 +387,13 @@ class PredictionService:
             total_models=len(self.models),
             final_score=final_score,
             final_confidence=final_confidence,
+            final_z_score=final_z_score,
             predictions=predictions,
             confidences=confidences,
+            z_scores=z_scores,
             paragraphs=paragraphs_details,
         )
+
 
 
 prediction_service = PredictionService()

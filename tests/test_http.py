@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from sulku.constants import LABEL_AI
@@ -30,7 +31,7 @@ def test_classify_text_success():
             print("DEBUG: json_data is", json_data)
             print("DEBUG: mock_model.predict calls:", mock_model.predict.call_args_list)
             mock_model.predict.assert_called_once()
-            assert json_data["is_ai"] is False
+            assert json_data["is_ai"] is True
             assert json_data["ai_votes"] == 1
             assert json_data["final_score"] == 0.85
             assert "gemini-3.1-flash-lite" in json_data["predictions"]
@@ -375,3 +376,86 @@ def test_classify_text_per_paragraph_details():
             assert "gemini-3.1-flash-lite" in paragraphs[2]["predictions"]
             assert abs(paragraphs[2]["predictions"]["gemini-3.1-flash-lite"] - 0.8) < 1e-6
             assert abs(paragraphs[2]["final_score"] - 0.8) < 1e-6
+
+
+def test_prediction_service_ensemble_voting():
+    """Test PredictionService Stouffer Z-score ensemble voting with fixed denominator and clipped Z-scores."""
+    from sulku.prediction import prediction_service
+    from sulku.constants import LABEL_AI, LABEL_HUMAN
+
+    # We mock the models dict inside prediction_service
+    original_models = prediction_service.models
+    try:
+        # Case 1: 1 model, raw score 0.6 (smoothed score ~ 0.665) -> Z = (0.665 - 0.5)/0.1 ~ 1.65 >= 1.0 -> is_ai is True
+        model1 = MagicMock()
+        model1.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.6, 0.4])
+        prediction_service.models = {"model1": model1}
+
+        result = prediction_service.classify(
+            "This is a paragraph that is long enough to classify. It has many words in it."
+        )
+        assert result.is_ai is True
+        assert result.ai_votes == 1
+        expected_z1 = (result.predictions["model1"] - 0.5) / 0.1
+        assert pytest.approx(result.final_z_score, 0.01) == expected_z1
+        assert "model1" in result.z_scores
+
+        # Case 2: 1 model, raw score 0.3 -> Z < 0 (clipped to 0) -> is_ai is False
+        model1.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.3, 0.7])
+        result = prediction_service.classify(
+            "This is a paragraph that is long enough to classify. It has many words in it."
+        )
+        assert result.is_ai is False
+        assert result.ai_votes == 0
+        assert pytest.approx(result.final_z_score, 0.01) == 0.0
+
+        # Case 3: 3 models (k=3), positive z-scores. Combined = (z1 + z2 + 0) / sqrt(3)
+        model1 = MagicMock()
+        model1.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.6, 0.4])
+        model2 = MagicMock()
+        model2.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.7, 0.3])
+        model3 = MagicMock()
+        model3.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.3, 0.7])
+        prediction_service.models = {"model1": model1, "model2": model2, "model3": model3}
+
+        result = prediction_service.classify(
+            "This is a paragraph that is long enough to classify. It has many words in it."
+        )
+        assert result.is_ai is True
+        assert result.ai_votes == 2
+        z1 = max(0.0, (result.predictions["model1"] - 0.5) / 0.1)
+        z2 = max(0.0, (result.predictions["model2"] - 0.5) / 0.1)
+        z3 = max(0.0, (result.predictions["model3"] - 0.5) / 0.1)
+        expected_z_comb = (z1 + z2 + z3) / (3.0 ** 0.5)
+        assert pytest.approx(result.final_z_score, 0.01) == expected_z_comb
+
+        # Case 4: 3 models (k=3), 1 weak positive z-score. Combined = z1 / sqrt(3) < 1.0 -> is_ai is False
+        model1.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.55, 0.45])
+        model2.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.3, 0.7])
+        model3.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.4, 0.6])
+        result = prediction_service.classify(
+            "This is a paragraph that is long enough to classify. It has many words in it."
+        )
+        assert result.is_ai is False
+        assert result.ai_votes == 1
+        z1 = max(0.0, (result.predictions["model1"] - 0.5) / 0.1)
+        expected_z_comb = z1 / (3.0 ** 0.5)
+        assert pytest.approx(result.final_z_score, 0.01) == expected_z_comb
+
+        # Case 5: 3 models (k=3), 1 strong positive z-score (0.85 -> high Z). Combined = z1 / sqrt(3) >= 1.0 -> is_ai is True
+        model1.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.85, 0.15])
+        model2.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.2, 0.8])
+        model3.predict.return_value = ((LABEL_AI, LABEL_HUMAN), [0.3, 0.7])
+        result = prediction_service.classify(
+            "This is a paragraph that is long enough to classify. It has many words in it."
+        )
+        assert result.is_ai is True
+        assert result.ai_votes == 1
+        z1 = max(0.0, (result.predictions["model1"] - 0.5) / 0.1)
+        expected_z_comb = z1 / (3.0 ** 0.5)
+        assert pytest.approx(result.final_z_score, 0.01) == expected_z_comb
+
+    finally:
+        prediction_service.models = original_models
+
+

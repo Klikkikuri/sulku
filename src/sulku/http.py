@@ -54,12 +54,13 @@ class ClassificationResponse(BaseModel):
     total_models: int
     final_score: float
     final_confidence: float
+    final_z_score: float = Field(0.0, description="Stouffer combined Z-score across models.")
     predictions: dict[str, float]
     confidences: dict[str, float]
+    z_scores: dict[str, float] = Field(default_factory=dict, description="Per-model Z-scores.")
     paragraphs: list[ParagraphDetailResponse] = Field(
         ..., description="Per-paragraph predictions and metadata."
     )
-
 
 
 router = APIRouter(prefix="/api/v1/aidetect", tags=["classification"])
@@ -167,8 +168,10 @@ async def classify_text(
         total_models=res.total_models,
         final_score=res.final_score,
         final_confidence=res.final_confidence,
+        final_z_score=res.final_z_score,
         predictions=res.predictions,
         confidences=res.confidences,
+        z_scores=res.z_scores,
         paragraphs=[
             ParagraphDetailResponse(
                 text=p.text,

@@ -15,6 +15,7 @@ from sulku.cli.generate_fasttext import generate_fasttext_cmd
 from sulku.cli.generate_synthetic import generate_synthetic_cmd
 from sulku.cli.sample import sample_cmd
 from sulku.cli.serve import serve_cmd
+from sulku.cli.test import test_group
 from sulku.dataset import SyntheticDatasetGenerator
 
 
@@ -143,3 +144,4 @@ main.add_command(generate_synthetic_cmd)
 main.add_command(generate_fasttext_cmd)
 main.add_command(serve_cmd)
 main.add_command(detect_cmd)
+main.add_command(test_group)
