@@ -35,3 +35,7 @@ DEFAULT_ALPHA = 1.0
 
 # Paragraph filtering defaults
 DEFAULT_LONG_PARAGRAPH_WORDS = 10
+
+# Voting defaults
+HIGH_CONFIDENCE_THRESHOLD = 0.8
+

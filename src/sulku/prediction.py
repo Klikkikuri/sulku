@@ -22,6 +22,7 @@ from sulku.constants import (
     LABEL_HUMAN,
     MODEL_PATHS,
     DEFAULT_LONG_PARAGRAPH_WORDS,
+    HIGH_CONFIDENCE_THRESHOLD,
 )
 from sulku.utils import parse_paragraphs_and_sentences
 
@@ -304,8 +305,14 @@ class PredictionService:
         logger.info("ensemble final_score=%.6f", final_score)
         logger.info("ensemble final_confidence=%.6f", final_confidence)
 
-        # Majority voting logic (e.g., flagged if 2 or more models agree)
-        is_ai = ai_votes >= 2
+        # If any model flags the text as AI with high confidence, it's enough to classify it as AI-generated.
+        # Otherwise, fall back to majority voting.
+        any_high_confidence = any(score >= HIGH_CONFIDENCE_THRESHOLD for score in predictions.values())
+        if any_high_confidence:
+            is_ai = True
+        else:
+            majority_threshold = (len(self.models) // 2) + 1
+            is_ai = ai_votes >= majority_threshold
 
         # Map model paragraph-level predictions back to the original parsed paragraphs
         eligible_indices = [
