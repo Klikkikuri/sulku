@@ -12,8 +12,13 @@ dependencies = [
     "fastapi>=0.139.2",
     "fasttext>=0.9.3",
     "jinja2>=3.1.6",
-    "niitti",
+    "niitti[all]",
     "openai>=2.46.0",
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-exporter-prometheus>=0.65b0",
+    "opentelemetry-instrumentation-fastapi>=0.65b0",
+    "opentelemetry-instrumentation-logging>=0.65b0",
+    "opentelemetry-sdk>=1.44.0",
     "platformdirs>=4.10.1",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
@@ -23,6 +28,7 @@ dependencies = [
     "requests>=2.34.2",
     "scikit-learn>=1.9.0",
     "scikit-learn-intelex>=2026.1.0",
+    "structlog>=26.1.0",
     "tiktoken>=0.13.0",
     "trafilatura>=2.1.0",
     "uvicorn>=0.51.0",
@@ -59,3 +65,10 @@ dev = [
     "ruff>=0.15.22",
     "spacy>=3.8.14",
 ]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: marks tests as slow (deselected by default)",
+]
+
