@@ -374,6 +374,58 @@ def test_cli_detect_markdown_success(mock_post):
 
 @patch("httpx.post")
 @patch("trafilatura.extract")
+def test_cli_detect_html_success(mock_extract, mock_post):
+    """Test successful execution of the detect command on an HTML file using trafilatura."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "is_ai": False,
+        "ai_votes": 1,
+        "total_models": 1,
+        "final_score": 0.85,
+        "final_confidence": 0.70,
+        "predictions": {"gemini-3.1-flash-lite": 0.85},
+    }
+    mock_post.return_value = mock_response
+    mock_extract.return_value = "Extracted markdown from local HTML file."
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_file = Path(tmpdir) / "test.html"
+        test_file.write_text("<html><body><h1>Article</h1><p>Content</p></body></html>", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["detect", str(test_file)])
+
+        assert result.exit_code == 0
+        assert "Sending" in result.output
+        mock_extract.assert_called_once_with("<html><body><h1>Article</h1><p>Content</p></body></html>", output_format="markdown")
+        mock_post.assert_called_once_with(
+            "http://127.0.0.1:8000/api/v1/aidetect/",
+            content="Extracted markdown from local HTML file.",
+            headers={"Content-Type": "text/markdown"},
+            timeout=15.0,
+        )
+
+
+@patch("trafilatura.extract")
+def test_cli_detect_html_extract_failure(mock_extract):
+    """Test error handling when trafilatura extraction fails on an HTML file."""
+    mock_extract.return_value = None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_file = Path(tmpdir) / "empty.html"
+        test_file.write_text("<html></html>", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["detect", str(test_file)])
+
+        assert result.exit_code != 0
+        assert "Failed to extract markdown content from HTML file" in result.output
+
+
+
+@patch("httpx.post")
+@patch("trafilatura.extract")
 @patch("trafilatura.fetch_url")
 def test_cli_detect_url_success(mock_fetch_url, mock_extract, mock_post):
     """Test successful execution of the detect command when given a URL."""

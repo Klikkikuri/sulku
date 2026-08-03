@@ -38,9 +38,12 @@ def read_file_content(file_path: Path) -> Tuple[str, str]:
     """
     Read file content and detect its mime content type.
 
+    If the file is HTML, convert it into a markdown document using trafilatura.
+
     :param file_path: Path to the local file.
     :raises FileNotFoundError: If the file does not exist.
     :raises IsADirectoryError: If the path is a directory.
+    :raises RuntimeError: If HTML markdown extraction fails.
     :return: A tuple of (content, content_type).
     """
     if not file_path.exists():
@@ -68,6 +71,14 @@ def read_file_content(file_path: Path) -> Tuple[str, str]:
 
     if not content_type:
         content_type = "text/plain"
+
+    # If file is HTML, convert it to markdown using trafilatura
+    if content_type == "text/html" or file_path.suffix.lower() in (".html", ".htm"):
+        extracted = trafilatura.extract(content, output_format="markdown")
+        if not extracted:
+            raise RuntimeError(f"Failed to extract markdown content from HTML file '{file_path}'.")
+        content = extracted
+        content_type = "text/markdown"
 
     return content, content_type
 
@@ -154,8 +165,8 @@ def detect_cmd(path_or_url: str, url: str) -> None:
     """
     Detect if the text in a file or web page is AI-generated.
 
-    If given a URL, fetches the page using trafilatura and converts it
-    to markdown before sending to the aidetect service.
+    If given a URL or an HTML file, converts it to markdown using trafilatura
+    before sending to the aidetect service.
     """
     try:
         content, content_type, display_name = load_input(path_or_url)
