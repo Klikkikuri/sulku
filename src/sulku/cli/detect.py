@@ -13,8 +13,11 @@ import click
 import httpx
 import trafilatura
 
+from sulku.utils import prepare_input
+
 
 def fetch_url_content(url: str) -> str:
+
     """
     Fetch webpage content and convert it to markdown.
 
@@ -81,9 +84,6 @@ def read_file_content(file_path: Path) -> Tuple[str, str]:
         content_type = "text/markdown"
 
     return content, content_type
-
-
-from sulku.utils import prepare_input
 
 
 def load_input(path_or_url: str) -> Tuple[str, str, str]:
