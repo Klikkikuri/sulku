@@ -6,7 +6,13 @@ Tests the strip_markdown and count_words helper functions under various
 formatting and structure styles, ensuring correct output and count.
 """
 
-from sulku.utils import count_words, sentencize, strip_markdown, is_markdown
+from sulku.utils import (
+    count_words,
+    is_markdown,
+    parse_paragraphs_and_sentences,
+    sentencize,
+    strip_markdown,
+)
 
 
 def test_strip_markdown_none_and_empty():
@@ -145,3 +151,13 @@ def test_is_markdown_detection():
     assert is_markdown("Code block:\n```python\nprint(1)\n```") is True  # Code block
     assert is_markdown("> This is a blockquote.") is True  # Blockquote
     assert is_markdown("This has **bold** text.") is True  # Bold
+
+
+def test_unicode_nfkc_normalization():
+    """Test NFKC unicode normalization in strip_markdown and parse_paragraphs_and_sentences."""
+    # Fullwidth characters (e.g. Ｈｅｌｌｏ) and combining characters (e.g. a + ̈ -> ä)
+    combining_text = "a\u0308a\u0308"  # 'ä' represented as 'a' + combining diaeresis
+
+    parsed = parse_paragraphs_and_sentences(combining_text)
+    assert parsed[0][0] == "ää"
+

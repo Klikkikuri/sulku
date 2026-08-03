@@ -7,6 +7,7 @@ including stripping formatting and counting words.
 """
 
 import re
+import unicodedata
 
 
 def strip_markdown(text: str | None) -> str:
@@ -193,6 +194,10 @@ def parse_paragraphs_and_sentences(text: str) -> list[tuple[str, list[str]]]:
     """
     if not text:
         return []
+
+    # Normalize unicode characters to NFKC form before paragraph and sentence parsing
+    text = unicodedata.normalize("NFKC", text)
+
     # Split paragraphs by blank lines
     raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
     results: list[tuple[str, list[str]]] = []
