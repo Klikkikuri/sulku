@@ -98,3 +98,75 @@ def test_get_keep_alive_fallback():
     service._keep_alive["model_a"] = 60.0
     assert service.get_keep_alive("model_a") == 60.0
     assert service.get_keep_alive("model_b") == 300.0
+
+
+@pytest.mark.anyio
+async def test_api_load_unload(monkeypatch):
+    """Round-trip test for model load/unload API endpoints."""
+    from fastapi.testclient import TestClient
+    from sulku.http import create_app
+
+    mock_model = MagicMock()
+    monkeypatch.setattr("fasttext.load_model", lambda path: mock_model)
+
+    with TestClient(create_app()) as client:
+        # Initial status: not loaded
+        resp = client.get("/api/v1/aidetect/models")
+        assert resp.status_code == 200
+        target = resp.json()["models"][0]["name"]
+        assert resp.json()["models"][0]["loaded"] is False
+
+        # Load model via endpoint
+        load_resp = client.post(f"/api/v1/aidetect/models/{target}/load")
+        assert load_resp.status_code == 200
+        assert load_resp.json() == {"model": target, "loaded": True}
+
+        # Verify load status
+        resp = client.get("/api/v1/aidetect/models")
+        assert any(m["name"] == target and m["loaded"] is True for m in resp.json()["models"])
+
+        # Unload model via endpoint
+        unload_resp = client.post(f"/api/v1/aidetect/models/{target}/unload")
+        assert unload_resp.status_code == 200
+        assert unload_resp.json() == {"model": target, "loaded": False}
+
+        # Unload non-loaded model returns 404
+        err_resp = client.post(f"/api/v1/aidetect/models/{target}/unload")
+        assert err_resp.status_code == 404
+
+
+def test_metrics_endpoint():
+    """Verify GET /metrics returns 200 and Prometheus metrics format."""
+    from fastapi.testclient import TestClient
+    from sulku.http import create_app
+
+    with TestClient(create_app()) as client:
+        resp = client.get("/metrics")
+        assert resp.status_code == 200
+        assert "sulku_model_loads_total" in resp.text
+
+
+@pytest.mark.anyio
+async def test_semaphore_overload():
+    """Verify ClassifySemaphore raises OverloadError when queue is full."""
+    from sulku.concurrency import ClassifySemaphore
+
+    sem = ClassifySemaphore(max_concurrent=1, max_queue=1)
+
+    # Acquire the single concurrent slot
+    await sem.__aenter__()
+
+    # Create worker to enter waiting queue (queue depth = 1)
+    queue_task = asyncio.create_task(sem.__aenter__())
+    await asyncio.sleep(0.01)
+    assert sem.queue_depth == 1
+
+    # Next call exceeds max_queue=1 and raises OverloadError immediately
+    with pytest.raises(ClassifySemaphore.OverloadError, match="queue full"):
+        await sem.__aenter__()
+
+    # Clean up tasks
+    await sem.__aexit__()
+    await queue_task
+    await sem.__aexit__()
+

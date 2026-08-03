@@ -253,7 +253,32 @@ class PredictionService:
         self._loaded_at: Dict[str, float] = {}
         self._in_flight: Dict[str, int] = {}
         self._keep_alive: Dict[str, float] = {}  # per-model TTL overrides
+        self._inter_request_sum: Dict[str, float] = {}
+        self._inter_request_n: Dict[str, int] = {}
         self._eviction_task: asyncio.Task | None = None
+
+    def _update_adaptive_ttl(self, name: str, elapsed_since_last: float) -> None:
+        """Adjust per-model keep_alive toward k × mean inter-request interval (k=3).
+
+        Writes into ``self._keep_alive[name]`` (per-model dict) so models with
+        different traffic patterns each maintain an independent TTL. The single
+        scalar ``self.default_keep_alive`` is never mutated here — it stays as
+        the fallback for newly-loaded models.
+        """
+        k = 3.0
+        min_ttl, max_ttl = 60.0, 1800.0
+        n = self._inter_request_n.get(name, 0) + 1
+        s = self._inter_request_sum.get(name, 0.0) + elapsed_since_last
+        self._inter_request_n[name] = n
+        self._inter_request_sum[name] = s
+        adaptive = max(min_ttl, min(max_ttl, k * (s / n)))
+        prev = self._keep_alive.get(name, self.default_keep_alive)
+        if abs(adaptive - prev) > 10:
+            logger.debug(
+                "adaptive TTL %.0f→%.0f s model=%s (n=%d samples)",
+                prev, adaptive, name, n,
+            )
+            self._keep_alive[name] = adaptive
 
     def get_keep_alive(self, name: str) -> float:
         """Return the effective TTL for *name*, falling back to the default."""
@@ -279,8 +304,12 @@ class PredictionService:
 
     async def ensure_loaded(self, name: str) -> None:
         """Ensure a specific model by name is loaded into memory."""
+        now = time.monotonic()
         if name in self.models:
-            self._last_used[name] = time.monotonic()
+            if name in self._last_used:
+                elapsed = now - self._last_used[name]
+                self._update_adaptive_ttl(name, elapsed)
+            self._last_used[name] = now
             return
         if name not in MODEL_PATHS:
             raise KeyError(f"Unknown model '{name}'.")
@@ -288,7 +317,10 @@ class PredictionService:
             self._locks[name] = asyncio.Lock()
         async with self._locks[name]:
             if name in self.models:  # double-checked
-                self._last_used[name] = time.monotonic()
+                if name in self._last_used:
+                    elapsed = now - self._last_used[name]
+                    self._update_adaptive_ttl(name, elapsed)
+                self._last_used[name] = now
                 return
             path = MODEL_PATHS[name]
             loop = asyncio.get_running_loop()
@@ -296,7 +328,6 @@ class PredictionService:
                 _load_executor, fasttext.load_model, str(path.resolve().absolute())
             )
             self.models[name] = model
-            now = time.monotonic()
             self._last_used[name] = now
             self._loaded_at[name] = now
             self._in_flight[name] = 0
