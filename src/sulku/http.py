@@ -63,7 +63,37 @@ class ClassificationResponse(BaseModel):
     )
 
 
+class ModelInfo(BaseModel):
+    name: str = Field(..., description="The identifier of the fasttext classifier model.")
+    path: str = Field(..., description="Resolved absolute file path of the model.")
+    loaded: bool = Field(..., description="Whether the model is currently loaded in memory.")
+
+
+class ModelListResponse(BaseModel):
+    models: list[ModelInfo] = Field(..., description="List of configured classifier models.")
+
+
 router = APIRouter(prefix="/api/v1/aidetect", tags=["classification"])
+
+
+@router.get("/models", response_model=ModelListResponse)
+async def list_models():
+    """
+    List all configured fastText classifier models and their load status.
+    """
+    from sulku.constants import MODEL_PATHS
+
+    result = []
+    for name, path in MODEL_PATHS.items():
+        is_loaded = name in prediction_service.models
+        result.append(
+            ModelInfo(
+                name=name,
+                path=str(path.resolve().absolute()),
+                loaded=is_loaded,
+            )
+        )
+    return ModelListResponse(models=result)
 
 
 def verify_plain_text(body_bytes: bytes) -> None:

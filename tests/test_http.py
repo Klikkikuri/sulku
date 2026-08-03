@@ -13,6 +13,22 @@ def test_health_check():
     assert response.json() == {"status": "healthy"}
 
 
+def test_list_models():
+    """Verify that the list models endpoint returns configured model metadata."""
+    mock_model = MagicMock()
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
+        with TestClient(create_app()) as client:
+            response = client.get("/api/v1/aidetect/models")
+            assert response.status_code == 200
+            data = response.json()
+            assert "models" in data
+            assert len(data["models"]) >= 1
+            model_item = data["models"][0]
+            assert "name" in model_item
+            assert "path" in model_item
+            assert model_item["loaded"] is True
+
+
 def test_classify_text_success():
     """Test AI detection text classification endpoint with mocked fastText models."""
     mock_model = MagicMock()
