@@ -143,80 +143,40 @@ def test_cli_generate_synthetic_force(mock_generator_class):
         mock_generator.generate.assert_called_once_with(n_samples=1, seed=None, dest_dir=None, force=True, min_words=50)
 
 
-@patch("logging.basicConfig")
-def test_cli_logging_default(mock_basic_config, temp_dataset):
+@patch("sulku.bootstrap.setup_logging")
+def test_cli_logging_default(mock_setup_logging, temp_dataset):
     """Test that default CLI invocation configures logging with INFO level."""
     runner = CliRunner()
     result = runner.invoke(main, ["sample", str(temp_dataset), "-n", "1"])
     assert result.exit_code == 0
-    assert mock_basic_config.call_count == 1
-    kwargs = mock_basic_config.call_args[1]
-    assert kwargs["level"] == logging.INFO
-    assert kwargs["force"] is True
-    assert len(kwargs["handlers"]) == 1
-    assert kwargs["handlers"][0].formatter.show_extra is False
+    assert mock_setup_logging.call_count == 1
+    settings = mock_setup_logging.call_args[0][0]
+    assert settings.LOG_LEVEL == "INFO"
 
 
-@patch("logging.basicConfig")
-def test_cli_logging_debug_shorthand(mock_basic_config, temp_dataset):
+@patch("sulku.bootstrap.setup_logging")
+def test_cli_logging_debug_shorthand(mock_setup_logging, temp_dataset):
     """Test that --debug option configures logging with DEBUG level."""
     runner = CliRunner()
     result = runner.invoke(main, ["--debug", "sample", str(temp_dataset), "-n", "1"])
     assert result.exit_code == 0
-    assert mock_basic_config.call_count == 1
-    kwargs = mock_basic_config.call_args[1]
-    assert kwargs["level"] == logging.DEBUG
-    assert kwargs["force"] is True
-    assert len(kwargs["handlers"]) == 1
-    assert kwargs["handlers"][0].formatter.show_extra is True
+    assert mock_setup_logging.call_count == 1
+    settings = mock_setup_logging.call_args[0][0]
+    assert settings.LOG_LEVEL == "DEBUG"
 
 
-@patch("logging.basicConfig")
-def test_cli_logging_custom_level(mock_basic_config, temp_dataset):
+@patch("sulku.bootstrap.setup_logging")
+def test_cli_logging_custom_level(mock_setup_logging, temp_dataset):
     """Test that --log-level option configures logging with the requested level."""
     runner = CliRunner()
     result = runner.invoke(main, ["--log-level", "ERROR", "sample", str(temp_dataset), "-n", "1"])
     assert result.exit_code == 0
-    assert mock_basic_config.call_count == 1
-    kwargs = mock_basic_config.call_args[1]
-    assert kwargs["level"] == logging.ERROR
-    assert kwargs["force"] is True
-    assert len(kwargs["handlers"]) == 1
-    assert kwargs["handlers"][0].formatter.show_extra is False
+    assert mock_setup_logging.call_count == 1
+    settings = mock_setup_logging.call_args[0][0]
+    assert settings.LOG_LEVEL == "ERROR"
 
 
-def test_extra_formatter():
-    """Test the custom ExtraFormatter formatting with/without show_extra."""
-    from sulku.cli import ExtraFormatter
 
-    record = logging.LogRecord(
-        name="test_logger",
-        level=logging.DEBUG,
-        pathname="test.py",
-        lineno=10,
-        msg="A simple log message",
-        args=(),
-        exc_info=None,
-    )
-    # Add some extra attributes
-    record.token_usage = {"prompt_tokens": 10, "completion_tokens": 20}
-    record.simple_extra = "hello"
-
-    # 1. Formatting with show_extra=False
-    formatter_no_extra = ExtraFormatter(fmt="%(message)s", show_extra=False)
-    output_no_extra = formatter_no_extra.format(record)
-    assert output_no_extra == "A simple log message"
-
-    # 2. Formatting with show_extra=True
-    formatter_with_extra = ExtraFormatter(fmt="%(message)s", show_extra=True)
-    output_with_extra = formatter_with_extra.format(record)
-
-    # Check that extra attributes are vertically formatted and indented
-    assert "A simple log message" in output_with_extra
-    assert "simple_extra: hello" in output_with_extra
-    assert "token_usage:" in output_with_extra
-    assert "    completion_tokens: 20" in output_with_extra
-    assert "    prompt_tokens: 10" in output_with_extra
 
 
 def test_cli_generate_fasttext(temp_dataset):

@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Query, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional
-import logging
+from niitti import get_logger
 
 from .service import get_wikipedia_page
 from .client import WikipediaAPIError
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/wikipedia", tags=["wikipedia"])
 

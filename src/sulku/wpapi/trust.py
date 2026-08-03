@@ -1,8 +1,8 @@
-import logging
 from typing import Dict, Tuple, Optional
+from niitti import get_logger
 from .client import wp_client, WikipediaAPIError
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Simple in-memory cache for user revert statistics to avoid redundant calls in the same request/session
 # Cache key: (username, lang, limit) -> (revert_rate, total_checked, reverted_count)

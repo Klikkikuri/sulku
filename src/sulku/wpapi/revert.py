@@ -1,8 +1,8 @@
 import re
-import logging
 from typing import Any, Dict, List
+from niitti import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Standard tags that MediaWiki applies to reverted edits
 MW_REVERTED_TAGS = {"mw-reverted"}

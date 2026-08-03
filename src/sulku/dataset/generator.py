@@ -10,7 +10,7 @@ synthetic articles using LLMs.
 from datetime import datetime, timezone
 import hashlib
 import json
-import logging
+from niitti import get_logger
 import random
 from pathlib import Path
 from typing import Any, Optional, Union, cast
@@ -31,7 +31,7 @@ from sulku.constants import (
     DEFAULT_SOURCE_DIR,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SyntheticDatasetGenerator:

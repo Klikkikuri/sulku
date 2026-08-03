@@ -14,20 +14,17 @@ and includes a YAML front matter containing key metadata for each article.
 It utilizes process-level parallelism to accelerate batch processing of large archives.
 """
 
-import json
-import logging
-import os
-import sys
-from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import gettext
+import json
+import os
+from pathlib import Path
+import sys
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
-)
-logger = logging.getLogger(__name__)
+from niitti import get_logger
+
+logger = get_logger(__name__)
 
 # Default block types suitable for AI training (excluding audio, video, dynamic embeds, etc.)
 DEFAULT_ALLOWED_TYPES = {

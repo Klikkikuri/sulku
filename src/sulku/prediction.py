@@ -20,12 +20,12 @@ import asyncio
 import contextlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-import logging
 import time
 from typing import Dict, List, Tuple
 
 import fasttext
 import numpy as np
+from niitti import get_logger
 
 from sulku.constants import (
     DEFAULT_ALPHA,
@@ -74,7 +74,7 @@ def _patched_predict(self, text, k=1, threshold=0.0, on_unicode_error="strict"):
 
 
 fasttext.FastText._FastText.predict = _patched_predict
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 _load_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="model_loader")
 
 
@@ -407,30 +407,32 @@ class PredictionService:
         confidences = {}
 
         # Score each model concurrently to reduce end-to-end latency.
-        with ThreadPoolExecutor(max_workers=max(1, len(target_models))) as executor:
-            def _score_with_tracking(m_name: str, m_obj: fasttext.FastText._FastText):
-                self._last_used[m_name] = time.monotonic()
-                with self.track_in_flight(m_name):
-                    return _score_model(
-                        m_name,
-                        m_obj,
-                        paragraph_sentences,
-                        p_stay=p_stay,
-                        alpha=alpha,
-                    )
+        with logger.span("ensemble_classify", num_models=len(target_models)):
+            with ThreadPoolExecutor(max_workers=max(1, len(target_models))) as executor:
+                def _score_with_tracking(m_name: str, m_obj: fasttext.FastText._FastText):
+                    self._last_used[m_name] = time.monotonic()
+                    with self.track_in_flight(m_name):
+                        with logger.span("score_model", model_name=m_name):
+                            return _score_model(
+                                m_name,
+                                m_obj,
+                                paragraph_sentences,
+                                p_stay=p_stay,
+                                alpha=alpha,
+                            )
 
-            futures = {
-                executor.submit(
-                    _score_with_tracking,
-                    name,
-                    model,
-                ): name
-                for name, model in target_models.items()
-            }
-            model_results: List[Tuple[str, float, List[float], float]] = []
+                futures = {
+                    executor.submit(
+                        _score_with_tracking,
+                        name,
+                        model,
+                    ): name
+                    for name, model in target_models.items()
+                }
+                model_results: List[Tuple[str, float, List[float], float]] = []
 
-            for future in as_completed(futures):
-                model_results.append(future.result())
+                for future in as_completed(futures):
+                    model_results.append(future.result())
 
 
         for name, model_score, paragraph_scores, model_confidence in sorted(model_results, key=lambda item: item[0]):

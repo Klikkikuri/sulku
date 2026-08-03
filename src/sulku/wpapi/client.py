@@ -1,9 +1,9 @@
-import logging
+from niitti import get_logger
 import requests
 import ratelimit
 from typing import Any, Dict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WikipediaAPIError(Exception):

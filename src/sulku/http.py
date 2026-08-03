@@ -8,7 +8,6 @@ to the prediction module.
 """
 
 import asyncio
-import logging
 import os
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import asynccontextmanager
@@ -23,7 +22,9 @@ from .constants import DEFAULT_ALPHA, DEFAULT_P_STAY
 from sulku.prediction import prediction_service
 from sulku.utils import parse_paragraphs_and_sentences, strip_markdown
 
-logger = logging.getLogger(__name__)
+from niitti import get_logger
+
+logger = get_logger(__name__)
 
 _semaphore = ClassifySemaphore(max_concurrent=4, max_queue=32)
 _rate = EWMARate(half_life=30.0)
@@ -264,7 +265,8 @@ async def classify_text(
 
     try:
         async with _semaphore:
-            res = prediction_service.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha, models=models)
+            with logger.span("classify_text_endpoint", p_stay=p_stay, alpha=alpha):
+                res = prediction_service.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha, models=models)
     except ClassifySemaphore.OverloadError as exc:
         requests_shed.add(1)
         raise HTTPException(

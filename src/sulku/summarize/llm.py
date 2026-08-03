@@ -1,20 +1,20 @@
 import os
-import logging
 import contextvars
 from typing import Any, Optional
-
-from ..utils import count_words
-
-from ..dataset.reader import DatasetItem
-from .models import ArticleSummary, StyleVector
-from sulku.constants import DEFAULT_MODEL, SUMMARIZE_MODEL
 
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 import openai
 from openai.types.chat import ChatCompletionMessageParam
 
-logger = logging.getLogger(__name__)
+from niitti import get_logger
+
+from ..utils import count_words
+from ..dataset.reader import DatasetItem
+from .models import ArticleSummary, StyleVector
+from sulku.constants import DEFAULT_MODEL, SUMMARIZE_MODEL
+
+logger = get_logger(__name__)
 
 INSTRUCTIONS_SUMMARY = """
 You are a semantic decompression engine. 

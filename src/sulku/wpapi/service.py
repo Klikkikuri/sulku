@@ -1,13 +1,13 @@
-import logging
 from datetime import datetime, timezone
 import re
 from typing import Any, Dict, List, Optional, Tuple
+from niitti import get_logger
 
 from .client import wp_client, WikipediaClient, WikipediaAPIError
 from .revert import check_revision_reverted
 from .trust import is_user_trusted, clear_trust_cache
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WikipediaPageService:

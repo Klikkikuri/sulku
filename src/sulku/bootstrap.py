@@ -11,12 +11,22 @@ Order of precedence:
 """
 
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any, Generator, Literal, cast
 
-from niitti import SettingsProxy, get_logger
+from niitti import (
+    LoggingSettings,
+    SettingsProxy,
+    TelemetrySettings,
+    get_logger,
+    setup_logging,
+    setup_tracing,
+)
+from niitti.sentry import setup_sentry
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = get_logger(__name__)
+
+LogLevelType = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 _setup_active: bool = False
 _active_settings: "Settings | None" = None
@@ -36,6 +46,8 @@ class Settings(BaseSettings):
     keep_alive: float = 300.0
     max_concurrent: int = 4
     max_queue: int = 32
+    log_level: LogLevelType = "INFO"
+    service_name: str = "sulku"
 
 
 def get_settings() -> Settings | None:
@@ -71,8 +83,9 @@ def setup(
     """
     Bootstrap application configuration and settings for sulku.
 
-    Instantiates and activates ``Settings`` on entry, yielding the settings instance,
-    and cleans up active settings state on context exit.
+    Instantiates and activates ``Settings`` on entry, configures niitti logging,
+    tracing, and sentry integrations, yielding the settings instance, and cleans
+    up active settings state on context exit.
 
     :param settings_instance: Optional pre-configured ``Settings`` instance. If omitted, default settings are loaded.
     :yield: The active ``Settings`` instance.
@@ -92,6 +105,10 @@ def setup(
         settings_obj = settings_instance
 
     set_active_settings(settings_obj)
+
+    setup_logging(LoggingSettings(LOG_LEVEL=cast(LogLevelType, settings_obj.log_level)))
+    setup_tracing(TelemetrySettings(service_name=settings_obj.service_name))
+    setup_sentry()
 
     try:
         yield settings_obj
