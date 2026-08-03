@@ -43,6 +43,30 @@ def _model_last_used_cb(opts: CallbackOptions):
         yield Observation(now_wall - (now_mono - mono), {"model": name})
 
 
+def _queue_depth_cb(opts: CallbackOptions):
+    from sulku.http import _semaphore
+    yield Observation(_semaphore.queue_depth, {})
+
+
+def _psi_some_cb(opts: CallbackOptions):
+    from sulku.eviction import read_memory_psi
+    snap = read_memory_psi()
+    if snap:
+        yield Observation(snap.some_avg10, {})
+
+
+def _psi_full_cb(opts: CallbackOptions):
+    from sulku.eviction import read_memory_psi
+    snap = read_memory_psi()
+    if snap:
+        yield Observation(snap.full_avg10, {})
+
+
+def _request_rate_cb(opts: CallbackOptions):
+    from sulku.http import _rate
+    yield Observation(_rate.rate, {})
+
+
 # ── Model lifecycle ───────────────────────────────────────────────────────────
 model_loads = meter.create_counter(
     "sulku_model_loads_total",
@@ -78,4 +102,37 @@ model_in_flight = meter.create_up_down_counter(
     "sulku_model_in_flight_requests",
     description="Number of active classification requests per model.",
 )
+
+# ── Queue / concurrency ───────────────────────────────────────────────────────
+queue_depth = meter.create_observable_gauge(
+    "sulku_classify_queue_depth",
+    callbacks=[_queue_depth_cb],
+    description="Requests waiting for the concurrency semaphore.",
+)
+requests_shed = meter.create_counter(
+    "sulku_requests_shed_total",
+    description="Requests rejected with 503 due to overload.",
+)
+
+# ── Pressure signals ──────────────────────────────────────────────────────────
+psi_some_avg10 = meter.create_observable_gauge(
+    "sulku_memory_pressure_some_avg10",
+    callbacks=[_psi_some_cb],
+    description="PSI memory some.avg10 (% time at least one task stalled).",
+    unit="%",
+)
+psi_full_avg10 = meter.create_observable_gauge(
+    "sulku_memory_pressure_full_avg10",
+    callbacks=[_psi_full_cb],
+    description="PSI memory full.avg10 (% time all tasks stalled).",
+    unit="%",
+)
+
+# ── Traffic shape ─────────────────────────────────────────────────────────────
+request_rate_ewma = meter.create_observable_gauge(
+    "sulku_request_rate_ewma",
+    callbacks=[_request_rate_cb],
+    description="Exponentially-weighted moving average of classify requests per second.",
+)
+
 

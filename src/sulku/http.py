@@ -7,12 +7,17 @@ and request/response validation schemas. It delegates core classification tasks
 to the prediction module.
 """
 
+import asyncio
 import logging
+import os
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import asynccontextmanager
 from pydantic import BaseModel, Field
 
 from sulku.bootstrap import setup
+from sulku.concurrency import ClassifySemaphore, EWMARate
+from sulku.eviction import eviction_loop
+from sulku.metrics import requests_shed
 from sulku.wpapi import wpapi_router
 from .constants import DEFAULT_ALPHA, DEFAULT_P_STAY
 from sulku.prediction import prediction_service
@@ -20,16 +25,26 @@ from sulku.utils import parse_paragraphs_and_sentences, strip_markdown
 
 logger = logging.getLogger(__name__)
 
+_semaphore = ClassifySemaphore(max_concurrent=4, max_queue=32)
+_rate = EWMARate(half_life=30.0)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     with setup() as settings:
         prediction_service.default_keep_alive = settings.keep_alive
-        if settings.preload:
+        _semaphore.max_queue = settings.max_queue
+        _semaphore._sem = asyncio.Semaphore(settings.max_concurrent)
+        preload = getattr(app.state, "preload", settings.preload)
+        if preload:
             prediction_service.load_models()
+        task = asyncio.create_task(
+            eviction_loop(prediction_service), name="model-eviction"
+        )
         try:
             yield
         finally:
+            task.cancel()
             prediction_service.clear_models()
 
 
@@ -75,6 +90,13 @@ class ModelListResponse(BaseModel):
     models: list[ModelInfo] = Field(..., description="List of configured classifier models.")
 
 
+class KeepAliveRequest(BaseModel):
+    seconds: float = Field(
+        ...,
+        description="Idle TTL in seconds before a model is evicted. -1 disables TTL.",
+    )
+
+
 router = APIRouter(prefix="/api/v1/aidetect", tags=["classification"])
 
 
@@ -96,6 +118,40 @@ async def list_models():
             )
         )
     return ModelListResponse(models=result)
+
+
+@router.post("/models/{name}/load")
+async def load_model(name: str):
+    """
+    Explicitly load a model into memory.
+    """
+    from sulku.constants import MODEL_PATHS
+
+    if name not in MODEL_PATHS:
+        raise HTTPException(404, f"Unknown model '{name}'.")
+    await prediction_service.ensure_loaded(name)
+    return {"model": name, "loaded": True}
+
+
+@router.post("/models/{name}/unload")
+async def unload_model_endpoint(name: str):
+    """
+    Explicitly unload a model from memory.
+    """
+    try:
+        prediction_service.unload_model(name)
+    except KeyError:
+        raise HTTPException(404, f"Model '{name}' is not loaded.")
+    return {"model": name, "loaded": False}
+
+
+@router.patch("/models/keep-alive")
+async def set_keep_alive(body: KeepAliveRequest):
+    """
+    Update default idle TTL across all models.
+    """
+    prediction_service.default_keep_alive = body.seconds
+    return {"keep_alive": prediction_service.default_keep_alive}
 
 
 def verify_plain_text(body_bytes: bytes) -> None:
@@ -120,6 +176,12 @@ def verify_plain_text(body_bytes: bytes) -> None:
         )
 
 
+async def _preload_all() -> None:
+    from sulku.constants import MODEL_PATHS
+    for name in MODEL_PATHS:
+        await prediction_service.ensure_loaded(name)
+
+
 @router.post("/", response_model=ClassificationResponse)
 async def classify_text(
     req: Request,
@@ -132,12 +194,15 @@ async def classify_text(
 ):
     from sulku.constants import MODEL_PATHS
 
+    # Burst onset: EWMA ticks non-zero -> pre-load all models speculatively
+    if _rate.tick():
+        asyncio.create_task(_preload_all())
+
     target_names = models if models else list(MODEL_PATHS.keys())
     for name in target_names:
         if name not in MODEL_PATHS:
             raise HTTPException(422, f"Unknown model '{name}'.")
         await prediction_service.ensure_loaded(name)
-
 
     content_type = req.headers.get("content-type", "")
     main_type = (
@@ -198,7 +263,15 @@ async def classify_text(
         )
 
     try:
-        res = prediction_service.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha, models=models)
+        async with _semaphore:
+            res = prediction_service.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha, models=models)
+    except ClassifySemaphore.OverloadError as exc:
+        requests_shed.add(1)
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "5"},
+            detail=str(exc),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -226,12 +299,12 @@ async def classify_text(
     )
 
 
-
-def create_app() -> FastAPI:
+def create_app(preload: bool = False) -> FastAPI:
     from prometheus_client import make_asgi_app
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
     app = FastAPI(title="AI Text Classifier Service", lifespan=lifespan)
+    app.state.preload = preload
     FastAPIInstrumentor.instrument_app(app)
     app.mount("/metrics", make_asgi_app())
 
@@ -243,3 +316,18 @@ def create_app() -> FastAPI:
     app.include_router(router)
 
     return app
+
+
+def create_app_from_env() -> FastAPI:
+    """
+    Factory function for Uvicorn when starting with ``--reload`` (``factory=True``).
+
+    When Uvicorn runs in reload mode, it spawns separate child worker processes that
+    re-import application modules upon file changes. Passing the import path string
+    ``"sulku.http:create_app_from_env"`` allows child workers to independently instantiate
+    the app while reading environment settings (such as ``SULKU_PRELOAD``).
+    """
+    preload = os.getenv("SULKU_PRELOAD", "false").lower() in ("true", "1")
+    return create_app(preload=preload)
+
+

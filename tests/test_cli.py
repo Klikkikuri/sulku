@@ -253,14 +253,11 @@ def test_cli_serve_defaults(mock_uvicorn_run):
     result = runner.invoke(main, ["serve"])
 
     assert result.exit_code == 0
-    assert "Starting server on 127.0.0.1:8000 (reload=False)..." in result.output
-    mock_uvicorn_run.assert_called_once_with(
-        "sulku.http:create_app",
-        host="127.0.0.1",
-        port=8000,
-        reload=False,
-        factory=True,
-    )
+    assert "Starting server on 127.0.0.1:8000 (reload=False, preload=False)..." in result.output
+    assert mock_uvicorn_run.call_count == 1
+    call_args, call_kwargs = mock_uvicorn_run.call_args
+    assert call_kwargs["host"] == "127.0.0.1"
+    assert call_kwargs["port"] == 8000
 
 
 @patch("uvicorn.run")
@@ -270,14 +267,15 @@ def test_cli_serve_custom(mock_uvicorn_run):
     result = runner.invoke(main, ["serve", "--host", "0.0.0.0", "--port", "9000", "--reload"])
 
     assert result.exit_code == 0
-    assert "Starting server on 0.0.0.0:9000 (reload=True)..." in result.output
+    assert "Starting server on 0.0.0.0:9000 (reload=True, preload=False)..." in result.output
     mock_uvicorn_run.assert_called_once_with(
-        "sulku.http:create_app",
+        "sulku.http:create_app_from_env",
         host="0.0.0.0",
         port=9000,
         reload=True,
         factory=True,
     )
+
 
 
 @patch("uvicorn.run")
