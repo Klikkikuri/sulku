@@ -16,9 +16,12 @@ combine them using Stouffer's method over a fixed denominator (sqrt(k)). This av
 mismatched specialists from diluting correct positive detections.
 """
 
+import asyncio
+import contextlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import logging
+import time
 from typing import Dict, List, Tuple
 
 import fasttext
@@ -36,6 +39,7 @@ from sulku.constants import (
     MODEL_CALIBRATION,
     MODEL_PATHS,
 )
+from sulku.metrics import model_in_flight, model_loads, model_unloads
 from sulku.utils import parse_paragraphs_and_sentences
 
 # Monkey-patch fasttext for NumPy 2.x compatibility
@@ -71,6 +75,7 @@ def _patched_predict(self, text, k=1, threshold=0.0, on_unicode_error="strict"):
 
 fasttext.FastText._FastText.predict = _patched_predict
 logger = logging.getLogger(__name__)
+_load_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="model_loader")
 
 
 @dataclass
@@ -239,32 +244,97 @@ class PredictionService:
     """Service to load fastText models and run ensemble text classification."""
 
     default_keep_alive: float = 300.0
+    min_loaded_time: float = 60.0  # cooldown — no eviction within N s of load
 
     def __init__(self) -> None:
         self.models: Dict[str, fasttext.FastText._FastText] = {}
+        self._locks: Dict[str, asyncio.Lock] = {}
+        self._last_used: Dict[str, float] = {}
+        self._loaded_at: Dict[str, float] = {}
+        self._in_flight: Dict[str, int] = {}
+        self._keep_alive: Dict[str, float] = {}  # per-model TTL overrides
+        self._eviction_task: asyncio.Task | None = None
 
-    def load_models(self) -> None:
-        """Load configured fastText models into memory."""
-        for model_name, model_path in MODEL_PATHS.items():
-            self.models[model_name] = fasttext.load_model(str(model_path.resolve().absolute()))
+    def get_keep_alive(self, name: str) -> float:
+        """Return the effective TTL for *name*, falling back to the default."""
+        return self._keep_alive.get(name, self.default_keep_alive)
 
-    def ensure_loaded(self, name: str) -> None:
+    def evict_model(self, name: str, reason: str = "eviction") -> None:
+        """Unload model from memory by deleting the Python reference."""
+        if name not in self.models:
+            return
+        del self.models[name]
+        self._last_used.pop(name, None)
+        self._loaded_at.pop(name, None)
+        self._keep_alive.pop(name, None)
+        self._in_flight.pop(name, None)
+        model_unloads.add(1, {"model": name, "reason": reason})
+        logger.info("model=%s evicted reason=%s (~92 MB heap freed)", name, reason)
+
+    def unload_model(self, name: str) -> None:
+        """Manual eviction via API; raises KeyError if model not loaded."""
+        if name not in self.models:
+            raise KeyError(name)
+        self.evict_model(name, reason="manual")
+
+    async def ensure_loaded(self, name: str) -> None:
         """Ensure a specific model by name is loaded into memory."""
         if name in self.models:
+            self._last_used[name] = time.monotonic()
             return
         if name not in MODEL_PATHS:
             raise KeyError(f"Unknown model '{name}'.")
-        path = MODEL_PATHS[name]
-        self.models[name] = fasttext.load_model(str(path.resolve().absolute()))
+        if name not in self._locks:
+            self._locks[name] = asyncio.Lock()
+        async with self._locks[name]:
+            if name in self.models:  # double-checked
+                self._last_used[name] = time.monotonic()
+                return
+            path = MODEL_PATHS[name]
+            loop = asyncio.get_running_loop()
+            model = await loop.run_in_executor(
+                _load_executor, fasttext.load_model, str(path.resolve().absolute())
+            )
+            self.models[name] = model
+            now = time.monotonic()
+            self._last_used[name] = now
+            self._loaded_at[name] = now
+            self._in_flight[name] = 0
+            model_loads.add(1, {"model": name})
+            logger.info("model=%s loaded", name)
+
+    @contextlib.contextmanager
+    def track_in_flight(self, name: str):
+        """Context manager to track active in-flight requests per model."""
+        self._in_flight[name] = self._in_flight.get(name, 0) + 1
+        model_in_flight.add(1, {"model": name})
+        try:
+            yield
+        finally:
+            self._in_flight[name] = max(0, self._in_flight.get(name, 1) - 1)
+            model_in_flight.add(-1, {"model": name})
+
+    def load_models(self) -> None:
+        """Load configured fastText models into memory."""
+        now = time.monotonic()
+        for model_name, model_path in MODEL_PATHS.items():
+            if model_name not in self.models:
+                self.models[model_name] = fasttext.load_model(str(model_path.resolve().absolute()))
+                self._last_used[model_name] = now
+                self._loaded_at[model_name] = now
+                self._in_flight[model_name] = 0
+                model_loads.add(1, {"model": model_name})
 
     def clear_models(self) -> None:
         """Clear all loaded fastText models from memory."""
-        self.models.clear()
+        for name in list(self.models.keys()):
+            self.evict_model(name, reason="manual")
 
     @property
     def is_initialized(self) -> bool:
         """Check if any models are currently loaded."""
         return len(self.models) > 0
+
 
     def classify(
         self,
@@ -307,14 +377,22 @@ class PredictionService:
 
         # Score each model concurrently to reduce end-to-end latency.
         with ThreadPoolExecutor(max_workers=max(1, len(target_models))) as executor:
+            def _score_with_tracking(m_name: str, m_obj: fasttext.FastText._FastText):
+                self._last_used[m_name] = time.monotonic()
+                with self.track_in_flight(m_name):
+                    return _score_model(
+                        m_name,
+                        m_obj,
+                        paragraph_sentences,
+                        p_stay=p_stay,
+                        alpha=alpha,
+                    )
+
             futures = {
                 executor.submit(
-                    _score_model,
+                    _score_with_tracking,
                     name,
                     model,
-                    paragraph_sentences,
-                    p_stay=p_stay,
-                    alpha=alpha,
                 ): name
                 for name, model in target_models.items()
             }
@@ -322,6 +400,7 @@ class PredictionService:
 
             for future in as_completed(futures):
                 model_results.append(future.result())
+
 
         for name, model_score, paragraph_scores, model_confidence in sorted(model_results, key=lambda item: item[0]):
             for idx, paragraph_score in enumerate(paragraph_scores, start=1):

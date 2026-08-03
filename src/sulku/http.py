@@ -136,7 +136,8 @@ async def classify_text(
     for name in target_names:
         if name not in MODEL_PATHS:
             raise HTTPException(422, f"Unknown model '{name}'.")
-        prediction_service.ensure_loaded(name)
+        await prediction_service.ensure_loaded(name)
+
 
     content_type = req.headers.get("content-type", "")
     main_type = (
