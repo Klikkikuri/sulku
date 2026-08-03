@@ -13,10 +13,11 @@ def test_health_check():
     assert response.json() == {"status": "healthy"}
 
 
-def test_list_models():
-    """Verify that the list models endpoint returns configured model metadata."""
+def test_list_models(monkeypatch):
+    """Verify that the list models endpoint returns configured model metadata and load status."""
     mock_model = MagicMock()
     with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
+        # Default lazy startup: models not preloaded
         with TestClient(create_app()) as client:
             response = client.get("/api/v1/aidetect/models")
             assert response.status_code == 200
@@ -26,6 +27,15 @@ def test_list_models():
             model_item = data["models"][0]
             assert "name" in model_item
             assert "path" in model_item
+            assert model_item["loaded"] is False
+
+        # Preload startup mode: models loaded at server startup
+        monkeypatch.setenv("SULKU_PRELOAD", "true")
+        with TestClient(create_app()) as client:
+            response = client.get("/api/v1/aidetect/models")
+            assert response.status_code == 200
+            data = response.json()
+            model_item = data["models"][0]
             assert model_item["loaded"] is True
 
 

@@ -238,6 +238,8 @@ def _score_model(
 class PredictionService:
     """Service to load fastText models and run ensemble text classification."""
 
+    default_keep_alive: float = 300.0
+
     def __init__(self) -> None:
         self.models: Dict[str, fasttext.FastText._FastText] = {}
 
@@ -245,6 +247,15 @@ class PredictionService:
         """Load configured fastText models into memory."""
         for model_name, model_path in MODEL_PATHS.items():
             self.models[model_name] = fasttext.load_model(str(model_path.resolve().absolute()))
+
+    def ensure_loaded(self, name: str) -> None:
+        """Ensure a specific model by name is loaded into memory."""
+        if name in self.models:
+            return
+        if name not in MODEL_PATHS:
+            raise KeyError(f"Unknown model '{name}'.")
+        path = MODEL_PATHS[name]
+        self.models[name] = fasttext.load_model(str(path.resolve().absolute()))
 
     def clear_models(self) -> None:
         """Clear all loaded fastText models from memory."""

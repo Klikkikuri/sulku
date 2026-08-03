@@ -12,6 +12,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import asynccontextmanager
 from pydantic import BaseModel, Field
 
+from sulku.bootstrap import setup
 from sulku.wpapi import wpapi_router
 from .constants import DEFAULT_ALPHA, DEFAULT_P_STAY
 from sulku.prediction import prediction_service
@@ -22,13 +23,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Load models ONCE on server startup
-    try:
-        prediction_service.load_models()
-        yield
-    finally:
-        # Clean up resources on shutdown if necessary
-        prediction_service.clear_models()
+    with setup() as settings:
+        prediction_service.default_keep_alive = settings.keep_alive
+        if settings.preload:
+            prediction_service.load_models()
+        try:
+            yield
+        finally:
+            prediction_service.clear_models()
 
 
 class ClassificationRequest(BaseModel):
@@ -128,8 +130,13 @@ async def classify_text(
         description="Optional list of specific model names to evaluate. Omit to evaluate all loaded models.",
     ),
 ):
-    if not prediction_service.is_initialized:
-        raise HTTPException(status_code=500, detail="Models not initialized.")
+    from sulku.constants import MODEL_PATHS
+
+    target_names = models if models else list(MODEL_PATHS.keys())
+    for name in target_names:
+        if name not in MODEL_PATHS:
+            raise HTTPException(422, f"Unknown model '{name}'.")
+        prediction_service.ensure_loaded(name)
 
     content_type = req.headers.get("content-type", "")
     main_type = (
