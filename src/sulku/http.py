@@ -220,7 +220,12 @@ async def classify_text(
 
 
 def create_app() -> FastAPI:
+    from prometheus_client import make_asgi_app
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
     app = FastAPI(title="AI Text Classifier Service", lifespan=lifespan)
+    FastAPIInstrumentor.instrument_app(app)
+    app.mount("/metrics", make_asgi_app())
 
     @app.get("/health")
     async def health_check():
