@@ -106,10 +106,18 @@ def detect_text(api_url: str, content: str, content_type: str) -> dict:
     :raises httpx.HTTPError: If the HTTP request fails.
     :return: The JSON response dictionary from the service.
     """
+    headers = {"Content-Type": content_type}
+    try:
+        from opentelemetry.propagate import inject
+
+        inject(headers)
+    except Exception:
+        pass
+
     r = httpx.post(
         api_url,
         content=content,
-        headers={"Content-Type": content_type},
+        headers=headers,
         timeout=15.0,
     )
     r.raise_for_status()

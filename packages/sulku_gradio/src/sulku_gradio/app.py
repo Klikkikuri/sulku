@@ -45,6 +45,12 @@ def analyze_input(text_or_url: str, api_url: str, selected_models: list[str], p_
         params["models"] = selected_models
 
     headers = {"Content-Type": f"{content_type}; charset=utf-8"}
+    try:
+        from opentelemetry.propagate import inject
+
+        inject(headers)
+    except Exception:
+        pass
 
     try:
         with httpx.Client(timeout=30.0) as client:
