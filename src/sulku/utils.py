@@ -214,3 +214,66 @@ def parse_paragraphs_and_sentences(text: str) -> list[tuple[str, list[str]]]:
 
     return results
 
+
+def fetch_url_content(url: str) -> str:
+    """
+    Fetch webpage content and convert it to markdown using trafilatura.
+
+    :param url: The URL of the webpage to fetch.
+    :raises RuntimeError: If fetching or extraction fails.
+    :return: The extracted markdown content.
+    """
+    import click
+    import trafilatura
+
+    click.echo(f"Fetching content from {url}...")
+    downloaded = trafilatura.fetch_url(url)
+    if not downloaded:
+        raise RuntimeError(f"Failed to fetch content from URL {url}")
+
+    content = trafilatura.extract(downloaded, output_format="markdown")
+    if not content:
+        raise RuntimeError(f"Failed to extract markdown content from URL {url}")
+
+    return content
+
+
+def prepare_input(text_or_path_or_url: str) -> tuple[str, str, str]:
+    """
+    Process raw user input (text, local file path, or URL) into payload content,
+    content-type, and display label.
+
+    :param text_or_path_or_url: Plain text, URL, or local file path.
+    :return: Tuple of (content_text, content_type, display_name).
+    """
+    input_str = text_or_path_or_url.strip()
+    if input_str.startswith(("http://", "https://")):
+        content = fetch_url_content(input_str)
+        return content, "text/markdown", input_str
+
+    # Check if it points to an existing file path
+    from pathlib import Path
+
+    file_path = Path(input_str)
+    if file_path.exists() and file_path.is_file():
+        content = file_path.read_text(encoding="utf-8")
+        content_type = "text/plain"
+
+        if file_path.suffix.lower() in (".md", ".markdown"):
+            content_type = "text/markdown"
+        elif file_path.suffix.lower() in (".html", ".htm"):
+            import trafilatura
+
+            extracted = trafilatura.extract(content, output_format="markdown")
+            if not extracted:
+                raise RuntimeError(f"Failed to extract markdown content from HTML file '{file_path}'.")
+            content = extracted
+            content_type = "text/markdown"
+
+        return content, content_type, file_path.name
+
+    # Raw text input fallback
+    is_md = is_markdown(input_str)
+    ctype = "text/markdown" if is_md else "text/plain"
+    return input_str, ctype, "Raw Text"
+

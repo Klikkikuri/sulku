@@ -83,20 +83,17 @@ def read_file_content(file_path: Path) -> Tuple[str, str]:
     return content, content_type
 
 
+from sulku.utils import prepare_input
+
+
 def load_input(path_or_url: str) -> Tuple[str, str, str]:
     """
-    Load content from either a local file path or a remote URL.
+    Load content from either a raw string, local file path, or remote URL.
 
-    :param path_or_url: A file path or URL.
+    :param path_or_url: Text string, file path, or URL.
     :return: A tuple of (content, content_type, display_name).
     """
-    if path_or_url.startswith(("http://", "https://")):
-        content = fetch_url_content(path_or_url)
-        return content, "text/markdown", path_or_url
-    else:
-        file_path = Path(path_or_url)
-        content, content_type = read_file_content(file_path)
-        return content, content_type, file_path.name
+    return prepare_input(path_or_url)
 
 
 def detect_text(api_url: str, content: str, content_type: str) -> dict:
