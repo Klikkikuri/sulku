@@ -1,0 +1,3 @@
+[submodule "packages/niitti"]
+	path = packages/niitti
+	url = ../Niitti.git
