@@ -13,7 +13,6 @@ from sulku.bootstrap import (
     Settings,
     clear_settings,
     get_settings,
-    set_active_settings,
     settings,
     setup,
 )

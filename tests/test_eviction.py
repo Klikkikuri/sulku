@@ -8,9 +8,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from sulku.eviction import (
-    PSI_CRITICAL_FULL,
-    PSI_HARD_THRESHOLD,
-    PSI_SOFT_THRESHOLD,
     PsiSnapshot,
     eviction_loop,
     read_memory_psi,
