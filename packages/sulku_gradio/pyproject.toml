@@ -1,0 +1,21 @@
+[build-system]
+requires = ["uv_build>=0.9.17,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "sulku-gradio"
+version = "0.1.0"
+description = "Gradio Web UI addon for testing the Sulku AI detection API"
+readme = "README.md"
+authors = [
+    { name = "Teemu Autto", email = "klikkikuri@teemu.rautakuu.org" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "gradio>=4.0.0",
+    "httpx>=0.28.1",
+    "click>=8.4.2",
+]
+
+[project.scripts]
+sulku-gradio = "sulku_gradio.cli:main"

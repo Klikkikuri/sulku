@@ -114,6 +114,11 @@ Start the HTTP API Server:
 uv run sulku serve --host 127.0.0.1 --port 8000
 ```
 
+Start the Gradio Web UI (requires running API server):
+```bash
+uv run --package sulku-gradio sulku-gradio --api-url http://127.0.0.1:8000
+```
+
 Submit a local text file or a public URL to the detection service:
 ```bash
 # Analyze a local file
@@ -144,6 +149,12 @@ uv run sulku generate-fasttext /app/data/huuman -o data/train.txt --label human 
 
 # Prepare synthetic training data (append mode)
 uv run sulku generate-fasttext /app/data/genai/gemini-3.1-flash-lite -o data/train.txt --label synthetic --lang fi --append
+```
+
+Evaluate detection service classification accuracy by sampling human and synthetic files:
+```bash
+# Sample 10 human and 10 synthetic articles, then run evaluation
+uv run sulku test detect -n 10
 ```
 
 ## Train fastText Classifier
