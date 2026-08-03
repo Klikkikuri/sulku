@@ -8,7 +8,7 @@ to the prediction module.
 """
 
 import logging
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import asynccontextmanager
 from pydantic import BaseModel, Field
 
@@ -123,6 +123,10 @@ async def classify_text(
     req: Request,
     p_stay: float = DEFAULT_P_STAY,
     alpha: float = DEFAULT_ALPHA,
+    models: list[str] | None = Query(
+        None,
+        description="Optional list of specific model names to evaluate. Omit to evaluate all loaded models.",
+    ),
 ):
     if not prediction_service.is_initialized:
         raise HTTPException(status_code=500, detail="Models not initialized.")
@@ -186,7 +190,7 @@ async def classify_text(
         )
 
     try:
-        res = prediction_service.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha)
+        res = prediction_service.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha, models=models)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:

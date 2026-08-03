@@ -53,6 +53,33 @@ def test_classify_text_success():
             assert "gemini-3.1-flash-lite" in json_data["predictions"]
 
 
+def test_classify_text_with_models_filter():
+    """Test filtering models during classification using the models query parameter."""
+    mock_model = MagicMock()
+    mock_model.predict.return_value = ((LABEL_AI,), [0.85])
+
+    with patch("sulku.prediction.fasttext.load_model", return_value=mock_model):
+        with TestClient(create_app()) as client:
+            response = client.post(
+                "/api/v1/aidetect/?models=gemini-3.1-flash-lite",
+                content="This is a long test string that satisfies the minimum length requirement.",
+                headers={"Content-Type": "text/plain"},
+            )
+            assert response.status_code == 200
+            json_data = response.json()
+            assert json_data["total_models"] == 1
+            assert list(json_data["predictions"].keys()) == ["gemini-3.1-flash-lite"]
+
+            # Invalid model name
+            err_resp = client.post(
+                "/api/v1/aidetect/?models=non-existent-model",
+                content="This is a long test string that satisfies the minimum length requirement.",
+                headers={"Content-Type": "text/plain"},
+            )
+            assert err_resp.status_code == 422
+
+
+
 def test_classify_text_validation_error():
     """Test validation errors for classify text (e.g. text too short)."""
     with patch("sulku.prediction.fasttext.load_model"):

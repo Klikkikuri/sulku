@@ -260,6 +260,7 @@ class PredictionService:
         text_or_paragraphs: str | List[Tuple[str, List[str]]],
         p_stay: float = DEFAULT_P_STAY,
         alpha: float = DEFAULT_ALPHA,
+        models: List[str] | None = None,
     ) -> EnsemblePredictionResult:
         """Classify a text document using the ensemble of loaded models.
 
@@ -269,6 +270,16 @@ class PredictionService:
         """
         if not self.is_initialized:
             raise ValueError("Models not initialized.")
+
+        target_models = self.models
+        if models is not None:
+            # Filter models to specified subset
+            missing = [m for m in models if m not in self.models]
+            if missing:
+                raise ValueError(f"Requested model(s) not found/loaded: {', '.join(missing)}")
+            if not models:
+                raise ValueError("At least one model must be specified in models parameter.")
+            target_models = {m: self.models[m] for m in models}
 
         if isinstance(text_or_paragraphs, str):
             parsed_paragraphs = parse_paragraphs_and_sentences(text_or_paragraphs)
@@ -284,7 +295,7 @@ class PredictionService:
         confidences = {}
 
         # Score each model concurrently to reduce end-to-end latency.
-        with ThreadPoolExecutor(max_workers=max(1, len(self.models))) as executor:
+        with ThreadPoolExecutor(max_workers=max(1, len(target_models))) as executor:
             futures = {
                 executor.submit(
                     _score_model,
@@ -294,7 +305,7 @@ class PredictionService:
                     p_stay=p_stay,
                     alpha=alpha,
                 ): name
-                for name, model in self.models.items()
+                for name, model in target_models.items()
             }
             model_results: List[Tuple[str, float, List[float], float]] = []
 
