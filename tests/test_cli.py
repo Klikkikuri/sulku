@@ -7,7 +7,6 @@ Tests the Click CLI command 'sample' under various usage patterns.
 
 from pathlib import Path
 import tempfile
-import logging
 from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 import pytest
