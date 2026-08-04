@@ -12,7 +12,6 @@ from niitti import get_logger
 from ..utils import count_words
 from ..dataset.reader import DatasetItem
 from .models import ArticleSummary, StyleVector
-from sulku.constants import DEFAULT_MODEL, SUMMARIZE_MODEL
 
 logger = get_logger(__name__)
 
@@ -164,7 +163,7 @@ def _check_completion_choice(choice: Any) -> None:
         raise ValueError("LLM generation reached the token limit (finish_reason: length).")
 
 
-def summarize_text(text: str, model: str = SUMMARIZE_MODEL) -> ArticleSummary:
+def summarize_text(text: str, model: str) -> ArticleSummary:
     """
     Summarize the given text using the specified LLM model.
 
@@ -173,9 +172,10 @@ def summarize_text(text: str, model: str = SUMMARIZE_MODEL) -> ArticleSummary:
     :return: The generated article summary.
     :raises ValueError: If the LLM response does not contain any choices or if the choice is rejected.
     """
+    chosen_model = model
     client = create_client()
     response = client.chat.completions.parse(
-        model=model,
+        model=chosen_model,
         messages=[
             {"role": "system", "content": prompt(INSTRUCTIONS_SUMMARY)},
             {"role": "user", "content": prompt(ARTICLE_CONTEXT, text=text)},
@@ -195,12 +195,12 @@ def summarize_text(text: str, model: str = SUMMARIZE_MODEL) -> ArticleSummary:
             "total_tokens": usage.total_tokens,
         }
         if usage
-        else None
+        else {}
     )
 
     logger.info(
         "Summarized text using model %s",
-        model,
+        chosen_model,
         extra={
             "token_usage": token_usage,
             "generated_structure": parsed.model_dump() if parsed else None,
@@ -213,7 +213,7 @@ def summarize_text(text: str, model: str = SUMMARIZE_MODEL) -> ArticleSummary:
 def create_synthetic_article(
     article: DatasetItem,
     summary: ArticleSummary,
-    model: str = DEFAULT_MODEL,
+    model: str,
     metadata_out: Optional[dict[str, Any]] = None,
     min_length_ratio: float = 0.7,
 ) -> str | None:
@@ -234,6 +234,7 @@ def create_synthetic_article(
                              a longer version.
     :type min_length_ratio: float, optional
     """
+    chosen_model = model
 
     est_tokens = len(article.content) / 4  # Rough estimate: 1 token ~ 4 characters
     words = count_words(article.content)
@@ -253,7 +254,7 @@ def create_synthetic_article(
     ]
 
     response = client.chat.completions.create(
-        model=model,
+        model=chosen_model,
         reasoning_effort="none",
         messages=messages,
         temperature=0,
@@ -296,7 +297,7 @@ def create_synthetic_article(
         })
 
         response_retry = client.chat.completions.create(
-            model=model,
+            model=chosen_model,
             reasoning_effort="none",
             messages=messages,
             temperature=0,

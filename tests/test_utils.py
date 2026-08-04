@@ -161,3 +161,35 @@ def test_unicode_nfkc_normalization():
     parsed = parse_paragraphs_and_sentences(combining_text)
     assert parsed[0][0] == "ää"
 
+
+def test_prepare_input_long_text():
+    """Test prepare_input with long text inputs exceeding OS filename limits."""
+    from sulku.utils import prepare_input
+
+    # Single-line long text (> 255 chars, would trigger Errno 36 File name too long)
+    long_single_line = "Tämä on hyvin pitkä teksti " * 20
+    content, ctype, display_name = prepare_input(long_single_line)
+    assert content == long_single_line.strip()
+    assert ctype == "text/plain"
+    assert display_name == "Raw Text"
+
+    # Multi-line text
+    multiline_text = "Ensimmäinen rivi.\nToinen rivi.\nKolmas rivi."
+    content, ctype, display_name = prepare_input(multiline_text)
+    assert content == multiline_text
+    assert display_name == "Raw Text"
+
+
+def test_prepare_input_existing_file(tmp_path):
+    """Test prepare_input with an existing local file."""
+    from sulku.utils import prepare_input
+
+    file_path = tmp_path / "sample.md"
+    file_path.write_text("# Hello World\nSample content.", encoding="utf-8")
+
+    content, ctype, display_name = prepare_input(str(file_path))
+    assert content == "# Hello World\nSample content."
+    assert ctype == "text/markdown"
+    assert display_name == "sample.md"
+
+

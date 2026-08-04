@@ -228,10 +228,8 @@ def fetch_url_content(url: str) -> str:
     :raises RuntimeError: If fetching or extraction fails.
     :return: The extracted markdown content.
     """
-    import click
     import trafilatura
 
-    click.echo(f"Fetching content from {url}...")
     downloaded = trafilatura.fetch_url(url)
     if not downloaded:
         raise RuntimeError(f"Failed to fetch content from URL {url}")
@@ -256,29 +254,34 @@ def prepare_input(text_or_path_or_url: str) -> tuple[str, str, str]:
         content = fetch_url_content(input_str)
         return content, "text/markdown", input_str
 
-    # Check if it points to an existing file path
+    # Check if it points to an existing file path safely without failing on long text
     from pathlib import Path
 
-    file_path = Path(input_str)
-    if file_path.exists() and file_path.is_file():
-        content = file_path.read_text(encoding="utf-8")
-        content_type = "text/plain"
+    try:
+        if "\n" not in input_str and "\r" not in input_str and len(input_str) <= 4096:
+            file_path = Path(input_str)
+            if file_path.exists() and file_path.is_file():
+                content = file_path.read_text(encoding="utf-8")
+                content_type = "text/plain"
 
-        if file_path.suffix.lower() in (".md", ".markdown"):
-            content_type = "text/markdown"
-        elif file_path.suffix.lower() in (".html", ".htm"):
-            import trafilatura
+                if file_path.suffix.lower() in (".md", ".markdown"):
+                    content_type = "text/markdown"
+                elif file_path.suffix.lower() in (".html", ".htm"):
+                    import trafilatura
 
-            extracted = trafilatura.extract(content, output_format="markdown")
-            if not extracted:
-                raise RuntimeError(f"Failed to extract markdown content from HTML file '{file_path}'.")
-            content = extracted
-            content_type = "text/markdown"
+                    extracted = trafilatura.extract(content, output_format="markdown")
+                    if not extracted:
+                        raise RuntimeError(f"Failed to extract markdown content from HTML file '{file_path}'.")
+                    content = extracted
+                    content_type = "text/markdown"
 
-        return content, content_type, file_path.name
+                return content, content_type, file_path.name
+    except (OSError, ValueError):
+        pass
 
     # Raw text input fallback
     is_md = is_markdown(input_str)
     ctype = "text/markdown" if is_md else "text/plain"
     return input_str, ctype, "Raw Text"
+
 

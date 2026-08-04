@@ -9,7 +9,6 @@ from pathlib import Path
 import sys
 import click
 
-from sulku.constants import DEFAULT_MODEL
 from sulku.dataset import SyntheticDatasetGenerator
 
 
@@ -26,7 +25,7 @@ from sulku.dataset import SyntheticDatasetGenerator
     "-m",
     "--model",
     type=str,
-    default=DEFAULT_MODEL,
+    default="gemini-3.1-flash-lite",
     help="LLM model name to use.",
 )
 @click.option(
