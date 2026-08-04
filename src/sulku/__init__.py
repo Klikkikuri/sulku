@@ -1,6 +1,6 @@
 from sulku.utils import count_words, sentencize, strip_markdown, is_markdown
 from sulku.dataset.generator import SyntheticDatasetGenerator
-from sulku.dataset.paired import ItemPair, PairedDataset, load_paired_dataset, generate_fasttext_sentence_data
+from sulku.dataset.paired import ItemPair, PairedDataset, load_paired_dataset
 
 __all__ = [
     "count_words",
@@ -11,5 +11,4 @@ __all__ = [
     "ItemPair",
     "PairedDataset",
     "load_paired_dataset",
-    "generate_fasttext_sentence_data",
 ]
