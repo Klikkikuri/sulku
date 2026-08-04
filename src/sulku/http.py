@@ -126,6 +126,10 @@ class KeepAliveRequest(BaseModel):
     )
 
 
+class HealthResponse(BaseModel):
+    status: str = "ok"
+
+
 router = APIRouter(prefix="/api/v1/aidetect", tags=["classification"])
 
 
@@ -350,9 +354,10 @@ def create_app(preload: bool = False) -> FastAPI:
     FastAPIInstrumentor.instrument_app(app)
     app.mount("/metrics", make_asgi_app())
 
-    @app.get("/health")
-    async def health_check():
-        return {"status": "healthy"}
+    @app.get("/health", response_model=HealthResponse, tags=["health"])
+    async def health_check() -> HealthResponse:
+        """Liveness probe — returns ``{"status": "ok"}`` when the server is up."""
+        return HealthResponse()
 
     app.include_router(wpapi_router)
     app.include_router(router)
