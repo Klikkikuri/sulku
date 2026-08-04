@@ -1,9 +1,6 @@
 # Sulku 🌌
 
-[![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
-[![Project](https://img.shields.io/badge/part%20of-Klikkikuri-orange.svg)](https://github.com/Klikkikuri)
-
-**Sulku** is the text classification, synthetic dataset generation, and AI-detection pipeline of the **[Klikkikuri](https://github.com/Klikkikuri)** project. Klikkikuri is an open-source initiative and browser extension designed to detect and correct sensation-seeking clickbait headlines. Sulku supports this mission by providing robust tools to identify machine-generated (synthetic) text, build synthetic training corpora, and verify content authenticity.
+**Sulku** is the text classification, synthetic dataset generation, and AI-detection pipeline of the **[Klikkikuri](https://github.com/Klikkikuri)** project. Klikkikuri is an open-source initiative and browser extension designed to detect and correct sensation-seeking clickbait headlines. Sulku supports this mission by providing tools to identify machine-generated (synthetic) text, build synthetic training corpora, and verify content authenticity.
 
 > [!IMPORTANT]
 > Sulku is **not** designed or intended to be a foolproof AI detection system.
@@ -37,7 +34,7 @@ flowchart TD
 ## 📄 Expected Document Formats for training
 
 Sulku processes both human-written and synthetic news articles as Markdown files containing YAML front matter
-metadata blocks. The schema for these metadata blocks is defined in [models.py](file:///app/src/sulku/dataset/models.py).
+metadata blocks. The schema for these metadata blocks is defined in [models.py](./src/sulku/dataset/models.py).
 
 ### Document Format
 
@@ -114,9 +111,43 @@ Start the HTTP API Server (supports `--preload`, `--keep-alive`, `--max-concurre
 uv run sulku serve --host 127.0.0.1 --port 8000 --keep-alive 300 --max-concurrent 4
 ```
 
+### 📦 Model Configuration & Auto-Discovery
+
+Sulku supports fastText models in both `.ftz` (compressed) and `.bin` (raw binary) formats. Models can be specified explicitly in application settings or automatically discovered from the local cache directory (`$SULKU_DATA_DIR/models`).
+
+- **Official Models**: Pre-trained Klikkikuri detection models are hosted on Hugging Face at [https://huggingface.co/klikkikuri/sulku](https://huggingface.co/klikkikuri/sulku).
+- **Model Sources**: Supported sources include local model file paths, model package directories, or Hugging Face URIs (`hf://owner/repo/path/to/model`).
+- **Auto-Discovery**: On startup, subdirectories inside the model cache directory are automatically scanned for valid fastText model files.
+- **Selection Preference**: When resolving a model directory or cache folder, candidate files are selected using a deterministic preference order:
+  1. **`.ftz` format**: Preferred if exactly one `.ftz` file is found.
+  2. **`.bin` format**: Used if no `.ftz` file exists and exactly one `.bin` file is found.
+  3. **Ambiguity Guard**: If multiple `.ftz` files (or multiple `.bin` files without `.ftz`) are present in the same directory, an `AmbiguousModelFileError` is raised rather than making an unsafe guess.
+
+#### 📥 Downloading & Defining Hugging Face Models
+
+Sulku automatically downloads and caches models on first access when referenced using `hf://` URIs. Inside the container, models are cached by default in `/app/data/models` (or `$SULKU_DATA_DIR/models`).
+
+**Hugging Face URI Format**: `hf://<owner>/<repo>[/<subpath>]`
+
+To define a model stored on Hugging Face (such as the subfolder at [https://huggingface.co/klikkikuri/sulku/tree/main/gemini-3.1-flash-lite](https://huggingface.co/klikkikuri/sulku/tree/main/gemini-3.1-flash-lite)):
+
+- **Folder / Subpath URI**: Map the repository path to an `hf://` URI:
+  ```text
+  hf://klikkikuri/sulku/gemini-3.1-flash-lite
+  ```
+  *Sulku will automatically fetch the folder and select the `.ftz` / `.bin` model file and optional `metadata.json` sidecar.*
+
+**Environment Variable Configuration (`SULKU_MODELS`)**:
+
+Models can be configured in `.env` or environment variables using a JSON array of `ModelSpec` objects:
+```env
+SULKU_MODELS='[{"name": "gemini-3.1-flash-lite", "source": "hf://klikkikuri/sulku/gemini-3.1-flash-lite"}]'
+```
+
 ### 🧠 Dynamic Model Lifecycle Management & Metrics
 
 Sulku features adaptive, PSI-aware model lifecycle management for low-latency burst handling and efficient memory usage:
+
 
 - **Lazy / Speculative Loading**: FastText models load on demand. On traffic burst onset (tracked via EWMA request rate), models are speculatively pre-loaded.
 - **Memory Pressure (PSI) & Dynamic Eviction**: Background eviction monitors container Cgroup v2 / Linux `/proc/pressure/memory`. Depending on `some_avg10` and `full_avg10` thresholds (Soft, Hard, Critical), idle models are automatically evicted to reclaim heap RAM.
