@@ -12,19 +12,23 @@ import uvicorn
 from sulku.http import create_app
 
 
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
+
+
 @click.command(name="serve")
 @click.option(
     "-h",
     "--host",
     type=str,
-    default="127.0.0.1",
+    default=DEFAULT_HOST,
     help="Host to bind the server to.",
 )
 @click.option(
     "-p",
     "--port",
     type=int,
-    default=8000,
+    default=DEFAULT_PORT,
     help="Port to bind the server to.",
 )
 @click.option(
