@@ -2,6 +2,7 @@ ARG PYTHON_VERSION=3.12
 ARG PYTHON_BASE_IMAGE=python:${PYTHON_VERSION}-bookworm
 
 ARG VIRTUAL_ENV="/app/.venv"
+ARG SULKU_DATA_DIR="/app/data"
 
 ARG UV_VERSION="0.5.20"
 
@@ -14,6 +15,7 @@ LABEL org.opencontainers.image.authors="klikkikuri@protonmail.com" \
     org.opencontainers.image.url="https://github.com/Klikkikuri"
 
 ARG VIRTUAL_ENV
+ARG SULKU_DATA_DIR
 
 ENV UV_COMPILE_BYTECODE=1 \
     # Copy from the cache instead of linking since it's a mounted volume
@@ -67,12 +69,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:${PYTHON_VERSION}-slim AS production
 
 ARG VIRTUAL_ENV
+ARG SULKU_DATA_DIR
 
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=${VIRTUAL_ENV} \
+    SULKU_DATA_DIR=${SULKU_DATA_DIR} \
     PATH="${VIRTUAL_ENV}/bin/:${PATH}"
 
 # Disable telemetry
@@ -80,12 +84,13 @@ ENV HAYSTACK_TELEMETRY_ENABLED="False" \
     ANONYMIZED_TELEMETRY="False" \
     SENTRY_ENVIRONMENT="production"
 
+
 # Copy virtual environment and application code from build stage
 COPY --from=build ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=build /app /app
 
 # Create non-root user
-RUN useradd -m -u 1000 sulku && chown -R sulku:sulku /app
+RUN useradd -m -u 1000 sulku && chown -R sulku:sulku ${SULKU_DATA_DIR}
 
 USER sulku
 
@@ -96,6 +101,7 @@ CMD [ "sulku", "serve", "--host", "0.0.0.0", "--port", "8000" ]
 FROM mcr.microsoft.com/devcontainers/python:${PYTHON_VERSION} AS development
 
 ARG VIRTUAL_ENV
+ARG SULKU_DATA_DIR  
 
 WORKDIR /app
 
@@ -106,6 +112,7 @@ COPY --from=uv-bin /uv /uvx /usr/local/bin/
 ENV UV_LINK_MODE=copy \
     SENTRY_ENVIRONMENT="development" \
     VIRTUAL_ENV=${VIRTUAL_ENV} \
+    SULKU_DATA_DIR=${SULKU_DATA_DIR} \
     PATH="${VIRTUAL_ENV}/bin/:${PATH}"
 
 # Disable telemetry
