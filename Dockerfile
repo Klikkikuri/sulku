@@ -15,8 +15,7 @@ LABEL org.opencontainers.image.authors="klikkikuri@protonmail.com" \
 
 ARG VIRTUAL_ENV
 
-ENV UV_VERSION=${UV_VERSION} \
-    UV_COMPILE_BYTECODE=1 \
+ENV UV_COMPILE_BYTECODE=1 \
     # Copy from the cache instead of linking since it's a mounted volume
     UV_LINK_MODE=copy
 
@@ -37,10 +36,8 @@ SHELL [ "/bin/bash", "-exo", "pipefail", "-c" ]
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get --no-install-recommends install -y \
-        # Install dumb-init for preventing zombie process lingering
         dumb-init gosu
 
-# Install UV
 VOLUME [ "${VIRTUAL_ENV}" ]
 
 COPY --from=uv-bin /uv /uvx ${VIRTUAL_ENV}/bin/
@@ -49,14 +46,14 @@ WORKDIR /app
 
 # Create a virtual environment
 RUN uv venv --allow-existing --seed "${VIRTUAL_ENV}" && \
-echo "source ${VIRTUAL_ENV}/bin/activate" >> /etc/bash.bashrc
+    echo "source ${VIRTUAL_ENV}/bin/activate" >> /etc/bash.bashrc
 
-# Install dependencies
+# Install dependencies (layer-cached before copying source)
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=packages,target=packages \
     uv sync --frozen --no-install-project --no-dev
-
 
 # Install the application
 COPY . /app
@@ -65,9 +62,36 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package sulku
 
-CMD [ "uv", "run", "sulku", "serve", "--host", "0.0.0.0", "--port", "8000" ]
+# Production stage — slim image, non-root user, venv copied from build
 
-# Development stage
+FROM python:${PYTHON_VERSION}-slim AS production
+
+ARG VIRTUAL_ENV
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    VIRTUAL_ENV=${VIRTUAL_ENV} \
+    PATH="${VIRTUAL_ENV}/bin/:${PATH}"
+
+# Disable telemetry
+ENV HAYSTACK_TELEMETRY_ENABLED="False" \
+    ANONYMIZED_TELEMETRY="False" \
+    SENTRY_ENVIRONMENT="production"
+
+# Copy virtual environment and application code from build stage
+COPY --from=build ${VIRTUAL_ENV} ${VIRTUAL_ENV}
+COPY --from=build /app /app
+
+# Create non-root user
+RUN useradd -m -u 1000 sulku && chown -R sulku:sulku /app
+
+USER sulku
+
+CMD [ "sulku", "serve", "--host", "0.0.0.0", "--port", "8000" ]
+
+# Development stage — devcontainers base image, dev deps, vscode user
 
 FROM mcr.microsoft.com/devcontainers/python:${PYTHON_VERSION} AS development
 
@@ -77,34 +101,21 @@ WORKDIR /app
 
 COPY --chown=vscode:vscode --from=build /app /app
 
-# Ensure `uv` is available in development stage regardless of virtualenv contents
 COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
-ENV UV_LINK_MODE=copy
+ENV UV_LINK_MODE=copy \
+    SENTRY_ENVIRONMENT="development" \
+    VIRTUAL_ENV=${VIRTUAL_ENV} \
+    PATH="${VIRTUAL_ENV}/bin/:${PATH}"
 
-ENV SENTRY_ENVIRONMENT="development"
-
-ENV VIRTUAL_ENV=$VIRTUAL_ENV \
-    PATH="${VIRTUAL_ENV}/bin/:${PATH}" \
-    XDG_CONFIG_HOME="/app/instance"
-    
 # Disable telemetry
 ENV HAYSTACK_TELEMETRY_ENABLED="False" \
     ANONYMIZED_TELEMETRY="False" \
     CODEGRAPH_TELEMETRY=0
 
-# Install nodejs and npm
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get --no-install-recommends install -y \
-        nodejs npm
-
-# Install codegraph CLI
-RUN npm install -g @colbymchenry/codegraph
-
 RUN echo "source ${VIRTUAL_ENV}/bin/activate" >> /etc/bash.bashrc
 
-# Install development dependencies
+# Install dev dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --dev --package sulku && \
     chown -R vscode:vscode /app/.venv
