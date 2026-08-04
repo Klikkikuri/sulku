@@ -3,6 +3,8 @@ Tests for PredictionService lifecycle methods, model loading/eviction, and ref-c
 """
 
 import asyncio
+import threading
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -186,4 +188,43 @@ async def test_semaphore_overload():
     await sem.__aexit__()
     await queue_task
     await sem.__aexit__()
+
+
+@pytest.mark.anyio
+async def test_ensure_loaded_store_get_offloaded_to_executor(monkeypatch):
+    """Verify store.get is offloaded to an executor and doesn't block the event loop thread."""
+    main_thread_id = threading.get_ident()
+    store_get_thread_id = None
+    event_loop_ran_concurrently = False
+
+    mock_store = MagicMock()
+    mock_package = MagicMock()
+    mock_package.path = MagicMock()
+    mock_package.path.exists.return_value = True
+    mock_store.get_spec.return_value = MagicMock()
+
+    def slow_store_get(name):
+        nonlocal store_get_thread_id
+        store_get_thread_id = threading.get_ident()
+        time.sleep(0.1)  # Simulate blocking download
+        return mock_package
+
+    mock_store.get.side_effect = slow_store_get
+    service = PredictionService(store=mock_store)
+    monkeypatch.setattr("fasttext.load_model", lambda path: MagicMock())
+
+    async def concurrent_task():
+        nonlocal event_loop_ran_concurrently
+        await asyncio.sleep(0.02)
+        event_loop_ran_concurrently = True
+
+    await asyncio.gather(
+        service.ensure_loaded("test_hf_model"),
+        concurrent_task(),
+    )
+
+    assert store_get_thread_id is not None
+    assert store_get_thread_id != main_thread_id
+    assert event_loop_ran_concurrently is True
+
 

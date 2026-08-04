@@ -74,6 +74,7 @@ def _patched_predict(self, text, k=1, threshold=0.0, on_unicode_error="strict"):
 
 fasttext.FastText._FastText.predict = _patched_predict
 logger = get_logger(__name__)
+_download_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="model_downloader")
 _load_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="model_loader")
 
 
@@ -328,8 +329,8 @@ class PredictionService:
                 self._last_used[name] = now
                 return
 
-            package = self.store.get(name)
             loop = asyncio.get_running_loop()
+            package = await loop.run_in_executor(_download_executor, self.store.get, name)
             model = await loop.run_in_executor(
                 _load_executor, fasttext.load_model, str(package.path.resolve().absolute())
             )
