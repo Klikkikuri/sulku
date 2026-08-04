@@ -109,6 +109,10 @@ class ModelInfo(BaseModel):
     name: str = Field(..., description="The identifier of the fasttext classifier model.")
     path: str = Field(..., description="Resolved absolute file path of the model.")
     loaded: bool = Field(..., description="Whether the model is currently loaded in memory.")
+    languages: list[str] = Field(
+        default_factory=list,
+        description="Supported ISO language codes for the classifier model.",
+    )
 
 
 class ModelListResponse(BaseModel):
@@ -138,11 +142,13 @@ async def list_models(
         is_loaded = name in pred_svc.models
         spec = store.get_spec(name)
         path_str = str(spec.source) if spec else ""
+        pkg = store.get(name)
         result.append(
             ModelInfo(
                 name=name,
                 path=path_str,
                 loaded=is_loaded,
+                languages=pkg.metadata.languages,
             )
         )
     return ModelListResponse(models=result)
@@ -295,7 +301,12 @@ async def classify_text(
     try:
         async with _semaphore:
             with logger.span("classify_text_endpoint", p_stay=p_stay, alpha=alpha):
-                res = pred_svc.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha, models=models)
+                res = pred_svc.classify(
+                    parsed_paragraphs,
+                    p_stay=p_stay,
+                    alpha=alpha,
+                    models=models,
+                )
     except ClassifySemaphore.OverloadError as exc:
         requests_shed.add(1)
         raise HTTPException(

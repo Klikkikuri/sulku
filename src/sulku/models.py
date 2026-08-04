@@ -34,6 +34,10 @@ class ModelMetadata(BaseModel):
     )
     description: Optional[str] = None
     created_at: Optional[datetime] = None
+    languages: list[str] = Field(
+        default_factory=list,
+        description="Supported ISO language codes for the model.",
+    )
 
 
 class ModelSpec(BaseModel):

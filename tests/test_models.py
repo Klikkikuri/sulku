@@ -369,3 +369,23 @@ def test_model_store_model_names(tmp_path):
     store = ModelStore(models=[s1, s2], cache_dir=tmp_path)
 
     assert store.model_names == ["m1", "m2"]
+
+
+def test_model_metadata_languages(tmp_path):
+    """Test default and custom languages in ModelMetadata."""
+    meta_default = ModelMetadata()
+    assert meta_default.languages == []
+
+    meta_custom = ModelMetadata(languages=["en", "sv"])
+    assert meta_custom.languages == ["en", "sv"]
+
+    model_file = tmp_path / "lang_test.ftz"
+    model_file.touch()
+    sidecar = tmp_path / "metadata.json"
+    sidecar.write_text(json.dumps({"languages": ["en", "fi"]}))
+
+    spec = ModelSpec(name="lang_m", source=model_file)
+    store = ModelStore(models=[spec], cache_dir=tmp_path)
+    metadata = store._resolve_metadata(spec, model_file, tmp_path)
+    assert metadata.languages == ["en", "fi"]
+

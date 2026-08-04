@@ -6,25 +6,62 @@ This module defines the Gradio interface that connects to the decoupled
 Sulku HTTP API endpoint (`/api/v1/aidetect/`).
 """
 
+from typing import Any
 import httpx
 import gradio as gr
 
 
-def fetch_available_models(api_url: str) -> list[str]:
-    """Fetch available model names from the API server."""
+def fetch_available_models(api_url: str) -> list[dict[str, Any]]:
+    """Fetch available model info objects (name, loaded, languages) from the API server."""
     endpoint = f"{api_url.rstrip('/')}/api/v1/aidetect/models"
     try:
         with httpx.Client(timeout=5.0) as client:
             resp = client.get(endpoint)
             if resp.status_code == 200:
                 data = resp.json()
-                return [m["name"] for m in data.get("models", []) if m.get("loaded", True)]
+                return data.get("models", [])
     except Exception:
         pass
     return []
 
 
-def analyze_input(text_or_url: str, api_url: str, selected_models: list[str], p_stay: float, alpha: float):
+def format_model_choices(model_infos: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Format model choices with language code labels for Gradio CheckboxGroup."""
+    choices = []
+    for m in model_infos:
+        name = m.get("name", "")
+        langs = m.get("languages", [])
+        lang_str = ", ".join(langs) if langs else "all"
+        label = f"{name} ({lang_str})"
+        choices.append((label, name))
+    return choices
+
+
+def detect_input_language(text: str) -> tuple[str, float]:
+    """Detect ISO language code and confidence score from input text using fast-langdetect."""
+    cleaned = text.strip()
+    if not cleaned:
+        return "", 0.0
+    try:
+        from fast_langdetect import detect
+
+        res = detect(cleaned.replace("\n", " "))
+        if isinstance(res, list) and len(res) > 0 and isinstance(res[0], dict):
+            return str(res[0].get("lang", "")), float(res[0].get("score", 0.0))
+        elif isinstance(res, dict):
+            return str(res.get("lang", "")), float(res.get("score", 0.0))
+    except Exception:
+        pass
+    return "", 0.0
+
+
+def analyze_input(
+    text_or_url: str,
+    api_url: str,
+    selected_models: list[str],
+    p_stay: float,
+    alpha: float,
+):
     """
     Sends text or URL content to the Sulku API endpoint and formats results for Gradio.
     """
@@ -110,7 +147,9 @@ def analyze_input(text_or_url: str, api_url: str, selected_models: list[str], p_
         para_rows.append([idx, score_str, p_text, len(sentences)])
 
         badge = f"<b style='color: {'red' if p_score and p_score >= 0.5 else 'green'};'>[Score: {score_str}]</b>"
-        para_html_blocks.append(f"<div><p><b>Paragraph {idx}</b> {badge}</p><blockquote style='background: #f9f9f9; padding: 8px;'>{p_text}</blockquote></div>")
+        para_html_blocks.append(
+            f"<div><p><b>Paragraph {idx}</b> {badge}</p><blockquote style='background: #f9f9f9; padding: 8px;'>{p_text}</blockquote></div>"
+        )
 
     para_html = "".join(para_html_blocks)
 
@@ -121,7 +160,9 @@ def create_ui(default_api_url: str = "http://127.0.0.1:8000") -> gr.Blocks:
     """
     Constructs the Gradio Blocks UI layout.
     """
-    initial_models = fetch_available_models(default_api_url)
+    initial_model_infos = fetch_available_models(default_api_url)
+    initial_choices = format_model_choices(initial_model_infos)
+    initial_model_names = [m["name"] for m in initial_model_infos]
 
     with gr.Blocks(title="Sulku AI Detector UI") as demo:
         gr.Markdown(
@@ -138,12 +179,25 @@ def create_ui(default_api_url: str = "http://127.0.0.1:8000") -> gr.Blocks:
                     placeholder="Paste article text here or enter a URL (e.g. https://yle.fi/a/...)...",
                     lines=10,
                 )
-                
+
+                with gr.Group():
+                    with gr.Row(equal_height=True):
+                        language_dropdown = gr.Dropdown(
+                            choices=["Any", "fi", "en", "sv"],
+                            value="Any",
+                            label="Target Language",
+                            info="Filter models by language support. Select 'Any' to check all models.",
+                            scale=3,
+                        )
+                        detect_lang_btn = gr.Button("Detect Language", size="sm", scale=1)
+
+                detected_lang_info = gr.Markdown("🌐 Language status: *Ready for input*")
+
                 model_selector = gr.CheckboxGroup(
-                    choices=initial_models,
-                    value=initial_models,
+                    choices=initial_choices,
+                    value=initial_model_names,
                     label="Active Models Ensemble",
-                    info="Select which fastText models to use for classification. Leave empty to use all.",
+                    info="All available models are shown. Models supporting the selected language are pre-selected.",
                 )
 
                 with gr.Accordion("Advanced Settings", open=False):
@@ -183,19 +237,71 @@ def create_ui(default_api_url: str = "http://127.0.0.1:8000") -> gr.Blocks:
                     interactive=False,
                 )
 
-        def update_models(api_url: str):
-            models = fetch_available_models(api_url)
-            return gr.update(choices=models, value=models)
+        def update_models_for_language(choice: str, api_url: str):
+            model_infos = fetch_available_models(api_url)
+            choices = format_model_choices(model_infos)
+            all_names = [m["name"] for m in model_infos]
+
+            if not choice or choice == "Any":
+                return gr.update(choices=choices, value=all_names)
+
+            target_lang = choice.lower().strip()
+            matching_names = []
+            for m in model_infos:
+                m_langs = [lang_code.lower() for lang_code in m.get("languages", [])]
+                if not m_langs or target_lang in m_langs:
+                    matching_names.append(m["name"])
+
+            return gr.update(choices=choices, value=matching_names)
+
+        def on_detect_language_clicked(text: str, api_url: str):
+            if not text.strip():
+                return "Any", "🌐 Language status: *No text provided*", update_models_for_language("Any", api_url)
+
+            detected_lang, score = detect_input_language(text)
+            if detected_lang and score > 0.1:
+                status_msg = f"🌐 Auto-detected Language: **{detected_lang.upper()}** (confidence: {score:.1%})"
+                selected_lang = detected_lang
+            else:
+                status_msg = "🌐 Language status: *Could not reliably detect language*"
+                selected_lang = "Any"
+
+            model_update = update_models_for_language(selected_lang, api_url)
+            return selected_lang, status_msg, model_update
+
+        demo.load(
+            fn=update_models_for_language,
+            inputs=[language_dropdown, api_url_input],
+            outputs=[model_selector],
+        )
+
+        detect_lang_btn.click(
+            fn=on_detect_language_clicked,
+            inputs=[input_text, api_url_input],
+            outputs=[language_dropdown, detected_lang_info, model_selector],
+        )
+
+        language_dropdown.change(
+            fn=update_models_for_language,
+            inputs=[language_dropdown, api_url_input],
+            outputs=[model_selector],
+        )
 
         refresh_models_btn.click(
-            fn=update_models,
-            inputs=[api_url_input],
+            fn=update_models_for_language,
+            inputs=[language_dropdown, api_url_input],
             outputs=[model_selector],
         )
 
         analyze_btn.click(
             fn=analyze_input,
-            inputs=[input_text, api_url_input, model_selector, p_stay_slider, alpha_slider],
+            inputs=[
+                input_text,
+                api_url_input,
+                model_selector,
+                p_stay_slider,
+                alpha_slider,
+            ],
             outputs=[verdict_md, model_scores, paragraph_html, paragraph_table],
         )
 

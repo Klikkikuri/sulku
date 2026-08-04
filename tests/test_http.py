@@ -449,7 +449,6 @@ def test_prediction_service_ensemble_voting(tmp_path):
     # Dummy model file required for ModelStore spec resolution
     dummy = tmp_path / "model.ftz"
     dummy.touch()
-    store = ModelStore(models=[ModelSpec(name="model1", source=dummy)], cache_dir=tmp_path)
 
     def _make_svc(*names: str) -> PredictionService:
         specs = [ModelSpec(name=n, source=dummy) for n in names]
@@ -518,3 +517,4 @@ def test_prediction_service_ensemble_voting(tmp_path):
     z1 = max(0.0, (result.predictions["model1"] - 0.5) / 0.1)
     expected_z_comb = z1 / (3.0 ** 0.5)
     assert pytest.approx(result.final_z_score, 0.01) == expected_z_comb
+
