@@ -7,13 +7,18 @@ cache summaries in user cache directory using platformdirs, and generate
 synthetic articles using LLMs.
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
 import hashlib
 import json
 from niitti import get_logger
 import random
 from pathlib import Path
-from typing import Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
+
+if TYPE_CHECKING:
+    from sulku.dataset.paired import PairedDataset
 
 import yaml
 from platformdirs import user_cache_dir
@@ -161,7 +166,7 @@ class SyntheticDatasetGenerator:
         dest_dir: Optional[Union[str, Path]] = None,
         force: bool = False,
         min_words: Optional[int] = 50,
-    ) -> list[Path]:
+    ) -> PairedDataset:
         """
         Generate a synthetic dataset from sampled articles.
 
@@ -178,8 +183,8 @@ class SyntheticDatasetGenerator:
         :type force: bool
         :param min_words: Minimum number of words required to keep an article.
         :type min_words: int, optional
-        :return: List of generated synthetic article file paths.
-        :rtype: list[Path]
+        :return: A PairedDataset of generated synthetic articles paired with source articles.
+        :rtype: PairedDataset
         """
         if dest_dir is None:
             dest_path = get_dest_dir_base() / self.model_name
@@ -219,7 +224,7 @@ class SyntheticDatasetGenerator:
                 f"Sample size {n_samples} is larger than the number of available "
                 f"matching files ({len(sampled_items)}) in the dataset."
             )
-        generated_paths = []
+        generated_paths: list[tuple[Path, Path]] = []
 
         for article in sampled_items:
             # Check if synthetic file already exists
@@ -228,6 +233,7 @@ class SyntheticDatasetGenerator:
 
             if out_file.exists() and not force:
                 logger.info("Skipping already generated synthetic article: %s", out_file)
+                generated_paths.append((article.path, out_file))
                 continue
 
             # 1. Fetch or create summary (cached)
@@ -276,6 +282,12 @@ class SyntheticDatasetGenerator:
                 f.write(full_text)
 
             logger.info("Wrote synthetic article: %s", out_file)
-            generated_paths.append(out_file)
+            generated_paths.append((article.path, out_file))
 
-        return generated_paths
+        from sulku.dataset.paired import PairedDataset
+
+        return PairedDataset(
+            source_dir=self.source_dir,
+            synthetic_dir=dest_path,
+            _paired_paths=generated_paths,
+        )

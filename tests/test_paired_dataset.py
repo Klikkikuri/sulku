@@ -4,7 +4,7 @@ Unit tests for Paired Dataset Utility
 
 Tests the PairedDataset and load_paired_dataset functionalities, including
 paired file discovery, lazy-loaded sequence properties (.source, .synthetic),
-indexing/slicing, random sampling, and filtering.
+indexing/slicing, shuffling, taking, and filtering.
 """
 
 from pathlib import Path
@@ -12,7 +12,13 @@ import tempfile
 from unittest.mock import patch
 import pytest
 
-from sulku.dataset.paired import ItemPair, PairedDataset, load_paired_dataset, generate_fasttext_sentence_data
+from sulku.dataset.paired import (
+    ItemPair,
+    PairedDataset,
+    export_paired_dataset_to_fasttext,
+    generate_fasttext_sentence_data,
+    load_paired_dataset,
+)
 from sulku.dataset.reader import DatasetItem
 
 
@@ -83,8 +89,9 @@ def test_paired_dataset_sequence_operations(temp_paired_dirs):
     assert item.source.content == "Source content 1"
     assert item.synthetic.content == "Synthetic content 1"
 
-    # Slicing
+    # Slicing returns a new PairedDataset instance
     sliced = ds[0:2]
+    assert isinstance(sliced, PairedDataset)
     assert len(sliced) == 2
     assert sliced[0].source.content == "Source content 1"
     assert sliced[1].source.content == "Source content 2"
@@ -114,20 +121,34 @@ def test_source_and_synthetic_properties(temp_paired_dirs):
     assert ds.synthetic[1].content == "Synthetic content 2"
 
 
-def test_sampling_and_filtering(temp_paired_dirs):
-    """Test sampling and filtering logic."""
+def test_shuffle_take_and_filtering(temp_paired_dirs):
+    """Test shuffle, take, split, and filtering logic."""
     src_dir, syn_dir = temp_paired_dirs
     ds = PairedDataset(source_dir=src_dir, synthetic_dir=syn_dir)
 
-    # Test sampling
-    sampled = ds.sample(1, seed=42)
-    assert len(sampled) == 1
-    assert sampled[0].source.content in ["Source content 1", "Source content 2"]
+    # Test shuffle and take
+    taken = ds.shuffle(seed=42).take(1)
+    assert isinstance(taken, PairedDataset)
+    assert len(taken) == 1
+    assert taken[0].source.content in ["Source content 1", "Source content 2"]
+
+    # Test split
+    train_ds, val_ds = ds.split(ratio=0.5, shuffle=False)
+    assert len(train_ds) == 1
+    assert len(val_ds) == 1
+    assert train_ds[0].source.content == "Source content 1"
+    assert val_ds[0].source.content == "Source content 2"
 
     # Test filtering (keep only Swedish articles)
     sv_ds = ds.filter(lambda item: item.source.metadata.get("language") == "sv")
+    assert isinstance(sv_ds, PairedDataset)
     assert len(sv_ds) == 1
     assert sv_ds[0].source.content == "Source content 2"
+
+    # Test mixin convenience filter
+    sv_ds_mixin = ds.filter_language("sv")
+    assert isinstance(sv_ds_mixin, PairedDataset)
+    assert len(sv_ds_mixin) == 1
 
 
 def test_load_paired_dataset_directory(temp_paired_dirs):
@@ -171,7 +192,7 @@ def test_generate_fasttext_sentence_data():
             items=[item1, item2],
             label="human",
             output_path=out_file,
-            min_word_count=4
+            min_word_count=4,
         )
 
         assert out_file.exists()
