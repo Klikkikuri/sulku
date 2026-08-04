@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from sulku.cli.detect import detect_cmd
 from sulku.cli.generate_fasttext import generate_fasttext_cmd
 from sulku.cli.generate_synthetic import generate_synthetic_cmd
+from sulku.cli.health import health_cmd
 from sulku.cli.sample import sample_cmd
 from sulku.cli.serve import serve_cmd
 from sulku.cli.test import test_group
@@ -49,4 +50,5 @@ main.add_command(generate_synthetic_cmd)
 main.add_command(generate_fasttext_cmd)
 main.add_command(serve_cmd)
 main.add_command(detect_cmd)
+main.add_command(health_cmd)
 main.add_command(test_group)
