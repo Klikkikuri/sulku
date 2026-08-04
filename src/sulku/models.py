@@ -66,6 +66,45 @@ class AmbiguousModelFileError(Exception):
         )
 
 
+def select_candidate(location: Path, candidates: list[Path] | None = None) -> Optional[Path]:
+    """
+    Deterministically select a single model file from ``candidates`` or by scanning ``location``.
+
+    Preference order:
+      1. If exactly one .ftz file exists, use it.
+      2. Else if no .ftz files but exactly one .bin file exists, use it.
+      3. Otherwise (multiple .ftz, or multiple .bin with no .ftz), the
+         choice is ambiguous and we raise rather than guess.
+
+    :param location: Directory path where candidates reside (or context for errors).
+    :param candidates: Optional list of candidate model file paths. If None, scans location for files matching MODEL_EXTENSIONS.
+    :return: Selected candidate Path, or None if no candidate files exist.
+    :raises AmbiguousModelFileError: If candidate files exist but choice is ambiguous.
+    """
+    if candidates is None:
+        if not location.exists() or not location.is_dir():
+            return None
+        candidates = [p for ext in MODEL_EXTENSIONS for p in location.glob(f"*{ext}")]
+
+    if not candidates:
+        return None
+
+    ftz_candidates = sorted(p for p in candidates if p.suffix == ".ftz")
+    bin_candidates = sorted(p for p in candidates if p.suffix == ".bin")
+
+    if len(ftz_candidates) == 1:
+        return ftz_candidates[0]
+    if ftz_candidates:
+        raise AmbiguousModelFileError(location, ftz_candidates)
+
+    if len(bin_candidates) == 1:
+        return bin_candidates[0]
+    if bin_candidates:
+        raise AmbiguousModelFileError(location, bin_candidates)
+
+    raise AmbiguousModelFileError(location, candidates)
+
+
 # ── ModelStore Registry & Lazy Resolver ───────────────────────────────────────
 
 class ModelStore:
@@ -203,13 +242,12 @@ class ModelStore:
 
         if local_path.is_dir():
             package_dir = local_path
-            candidates = [p for ext in MODEL_EXTENSIONS for p in package_dir.glob(f"*{ext}")]
-            if not candidates:
+            model_path = select_candidate(package_dir)
+            if not model_path:
                 raise FileNotFoundError(
                     f"No fastText model file ({'/'.join(MODEL_EXTENSIONS)}) found "
                     f"in package directory: {package_dir}"
                 )
-            model_path = self._select_candidate(package_dir, candidates)
         else:
             model_path = local_path
             package_dir = local_path.parent if local_path.parent.exists() else None
@@ -225,30 +263,13 @@ class ModelStore:
     def _select_candidate(location: Path, candidates: list[Path]) -> Path:
         """
         Deterministically select a single model file from candidates found at
-        `location`.
-
-        Preference order:
-          1. If exactly one .ftz file exists, use it.
-          2. Else if no .ftz files but exactly one .bin file exists, use it.
-          3. Otherwise (multiple .ftz, or multiple .bin with no .ftz), the
-             choice is ambiguous and we raise rather than guess.
+        ``location``.
         """
-        ftz_candidates = sorted(p for p in candidates if p.suffix == ".ftz")
-        bin_candidates = sorted(p for p in candidates if p.suffix == ".bin")
+        selected = select_candidate(location, candidates)
+        if selected is None:
+            raise AmbiguousModelFileError(location, candidates)
+        return selected
 
-        if len(ftz_candidates) == 1:
-            return ftz_candidates[0]
-        if ftz_candidates:
-            raise AmbiguousModelFileError(location, ftz_candidates)
-
-        if len(bin_candidates) == 1:
-            return bin_candidates[0]
-        if bin_candidates:
-            raise AmbiguousModelFileError(location, bin_candidates)
-
-        # Unreachable given callers only invoke this with a non-empty list,
-        # but guard anyway.
-        raise AmbiguousModelFileError(location, candidates)
 
     # ── Metadata resolution ──────────────────────────────────────────────────
 

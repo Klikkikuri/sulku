@@ -17,7 +17,7 @@ from niitti.sentry import setup_sentry
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from sulku.models import ModelSpec, ModelStore
+from sulku.models import ModelSpec, ModelStore, select_candidate
 
 logger = get_logger(__name__)
 
@@ -81,10 +81,11 @@ class Settings(BaseSettings):
             if self.model_cache_dir.exists() and self.model_cache_dir.is_dir():
                 for entry in sorted(self.model_cache_dir.iterdir()):
                     if entry.is_dir():
-                        ftz_file = entry / f"{entry.name}.ftz"
-                        if ftz_file.exists():
-                            discovered.append(ModelSpec(name=entry.name, source=ftz_file))
+                        model_file = select_candidate(entry)
+                        if model_file is not None:
+                            discovered.append(ModelSpec(name=entry.name, source=model_file))
             self.models = discovered
+
 
             logger.debug("Discovered %d models in cache directory '%s'",
                 len(discovered),
