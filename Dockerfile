@@ -90,7 +90,7 @@ COPY --from=build ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=build /app /app
 
 # Create non-root user
-RUN useradd -m -u 1000 sulku && chown -R sulku:sulku ${SULKU_DATA_DIR}
+RUN useradd -m -u 1000 sulku && mkdir -p ${SULKU_DATA_DIR} && chown -R sulku:sulku ${SULKU_DATA_DIR}
 
 USER sulku
 
