@@ -109,10 +109,26 @@ Watch now at [Yle Areena](https://areena.yle.fi/1-307177).
 
 The CLI tool is exposed via the `sulku` script command. Run all commands with `[uv run] sulku`.
 
-Start the HTTP API Server:
+Start the HTTP API Server (supports `--preload`, `--keep-alive`, `--max-concurrent`, and `--max-queue`):
 ```bash
-uv run sulku serve --host 127.0.0.1 --port 8000
+uv run sulku serve --host 127.0.0.1 --port 8000 --keep-alive 300 --max-concurrent 4
 ```
+
+### 🧠 Dynamic Model Lifecycle Management & Metrics
+
+Sulku features adaptive, PSI-aware model lifecycle management for low-latency burst handling and efficient memory usage:
+
+- **Lazy / Speculative Loading**: FastText models load on demand. On traffic burst onset (tracked via EWMA request rate), models are speculatively pre-loaded.
+- **Memory Pressure (PSI) & Dynamic Eviction**: Background eviction monitors container Cgroup v2 / Linux `/proc/pressure/memory`. Depending on `some_avg10` and `full_avg10` thresholds (Soft, Hard, Critical), idle models are automatically evicted to reclaim heap RAM.
+- **Adaptive Idle Keep-Alive**: Idle model TTLs adapt dynamically to traffic intervals.
+- **Concurrency & Load Shedding**: Concurrent classification requests are capped via `ClassifySemaphore`. When the queue exceeds `--max-queue`, requests are shed with `503 Service Unavailable` (`Retry-After: 5`).
+- **Prometheus Metrics**: Built-in OpenTelemetry instrumentation exposes metrics at `GET /metrics` for tracking model loads/unloads, classification latencies, active in-flight requests, queue depth, and memory PSI levels.
+- **Model Management API**: Dynamic runtime control endpoints:
+  - `POST /api/v1/aidetect/models/{name}/load`
+  - `POST /api/v1/aidetect/models/{name}/unload`
+  - `PATCH /api/v1/aidetect/models/keep-alive`
+  - `GET /metrics`
+
 
 Start the Gradio Web UI (requires running API server):
 ```bash
