@@ -4,8 +4,7 @@ Unit tests for Synthetic Dataset Generator
 
 Tests the SyntheticDatasetGenerator class, including deterministic sampling,
 caching logic (cache hit, cache miss, cache invalidation on content changes),
-metadata serialization, and output file generation with front matter and
-directory structure.
+metadata serialization, and output PairedDataset generation.
 """
 
 import json
@@ -16,6 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from sulku.dataset.generator import SyntheticDatasetGenerator
+from sulku.dataset.paired import PairedDataset
 from sulku.dataset.reader import DatasetItem
 from sulku.summarize.models import ArticleSummary, StyleVector
 
@@ -203,22 +203,24 @@ def test_generate_workflow(
     mock_create_synthetic.side_effect = side_effect
 
     # Generate from dummy dataset with 2 samples
-    generated_paths = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir)
+    paired_ds = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir)
 
-    assert len(generated_paths) == 2
+    assert isinstance(paired_ds, PairedDataset)
+    assert len(paired_ds) == 2
     assert mock_summarize.call_count == 2
     assert mock_create_synthetic.call_count == 2
 
     # Check that output directories mirror the source directory structure
-    for path in generated_paths:
-        assert path.exists()
-        assert path.relative_to(dummy_dest_dir) in [
+    for pair in paired_ds:
+        synth_path = pair.synthetic.path
+        assert synth_path.exists()
+        assert synth_path.relative_to(dummy_dest_dir) in [
             Path("2021/01/0000/art1.md"),
             Path("2021/01/0000/art2.md"),
         ]
 
         # Verify markdown content (front matter + body)
-        content = path.read_text(encoding="utf-8")
+        content = synth_path.read_text(encoding="utf-8")
         assert content.startswith("---")
         assert "language: fi" in content
         assert "Tämä on tekoälyn luoma synteettinen artikkeli." in content
@@ -253,8 +255,8 @@ def test_generate_skip_existing(
     mock_create_synthetic.return_value = "Tämä on tekoälyn luoma synteettinen artikkeli."
 
     # First run: generates 2 articles
-    generated_paths = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir)
-    assert len(generated_paths) == 2
+    paired_ds = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir)
+    assert len(paired_ds) == 2
     assert mock_summarize.call_count == 2
     assert mock_create_synthetic.call_count == 2
 
@@ -263,14 +265,14 @@ def test_generate_skip_existing(
     mock_create_synthetic.reset_mock()
 
     # Second run with force=False: should skip both since they already exist
-    generated_paths_second = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir, force=False)
-    assert len(generated_paths_second) == 0
+    paired_ds_second = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir, force=False)
+    assert len(paired_ds_second) == 2
     assert mock_summarize.call_count == 0
     assert mock_create_synthetic.call_count == 0
 
     # Third run with force=True: should regenerate both (calling LLM generator, but summary is cached)
-    generated_paths_third = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir, force=True)
-    assert len(generated_paths_third) == 2
+    paired_ds_third = generator.generate(n_samples=2, seed=100, dest_dir=dummy_dest_dir, force=True)
+    assert len(paired_ds_third) == 2
     assert mock_summarize.call_count == 0
     assert mock_create_synthetic.call_count == 2
 
@@ -307,12 +309,10 @@ def test_generate_min_words_filter(
         generator.generate(n_samples=3, seed=100, dest_dir=dummy_dest_dir, min_words=50)
 
     # Sampling 2 should succeed and exclude the short article.
-    generated_paths = generator.generate(
+    paired_ds = generator.generate(
         n_samples=2, seed=100, dest_dir=dummy_dest_dir, min_words=50
     )
-    assert len(generated_paths) == 2
+    assert len(paired_ds) == 2
     # Verify that the short article is not in the generated paths
-    for path in generated_paths:
-        assert path.name != "short_art.md"
-
-
+    for pair in paired_ds:
+        assert pair.synthetic.path.name != "short_art.md"

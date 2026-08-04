@@ -3,7 +3,7 @@ Unit tests for Dataset Reader Utility
 =====================================
 
 Tests the FileDataset and DatasetItem functionalities, including lazy-loaded
-metadata, content filtering, front matter stripping, and sampling.
+metadata, content filtering, front matter stripping, shuffle, take, split, and mixins.
 """
 
 import json
@@ -115,9 +115,9 @@ def test_sequence_operations(temp_dataset_dir):
     # Total 3 files in main dir. Let's index them.
     assert isinstance(ds[0], DatasetItem)
 
-    # Slicing
+    # Slicing returns a new FileDataset instance
     sliced = ds[0:2]
-    assert isinstance(sliced, list)
+    assert isinstance(sliced, FileDataset)
     assert len(sliced) == 2
     assert isinstance(sliced[0], DatasetItem)
 
@@ -174,23 +174,27 @@ def test_json_metadata_loader(temp_dataset_dir):
     assert meta["title"] == "JSON Article"
 
 
-def test_sampling(temp_dataset_dir):
-    """Test random sampling from dataset."""
+def test_shuffle_take_and_split(temp_dataset_dir):
+    """Test shuffle, take, and split methods."""
     ds = FileDataset(temp_dataset_dir, pattern="*")
 
-    # Check basic sampling
-    sampled = ds.sample(2)
-    assert len(sampled) == 2
-    assert isinstance(sampled[0], DatasetItem)
+    # Check shuffle and take
+    taken = ds.shuffle(seed=42).take(2)
+    assert len(taken) == 2
+    assert isinstance(taken, FileDataset)
+    assert isinstance(taken[0], DatasetItem)
 
     # Check reproducibility with seed
-    sampled1 = ds.sample(2, seed=42)
-    sampled2 = ds.sample(2, seed=42)
-    assert [s.path for s in sampled1] == [s.path for s in sampled2]
+    shuffled1 = ds.shuffle(seed=42).take(2)
+    shuffled2 = ds.shuffle(seed=42).take(2)
+    assert [s.path for s in shuffled1] == [s.path for s in shuffled2]
 
-    # Check too large sample size raises error
-    with pytest.raises(ValueError):
-        ds.sample(10)
+    # Check split
+    train_ds, val_ds = ds.split(ratio=0.5, shuffle=False)
+    assert len(train_ds) == 2
+    assert len(val_ds) == 2
+    assert isinstance(train_ds, FileDataset)
+    assert isinstance(val_ds, FileDataset)
 
 
 def test_extend_with_metadata_loader(temp_dataset_dir):
@@ -209,7 +213,7 @@ def test_extend_with_metadata_loader(temp_dataset_dir):
 
 
 def test_dataset_filtering_logic(tmp_path):
-    """Test language_filter, min_words_filter, non_empty_filter, and chaining filters."""
+    """Test language_filter, min_words_filter, non_empty_filter, mixin methods, and chaining filters."""
     # Create article 1: FI, 60 words
     art1 = tmp_path / "art1.md"
     art1.write_text(
@@ -233,39 +237,44 @@ def test_dataset_filtering_logic(tmp_path):
     ds = FileDataset(tmp_path, pattern="*.md")
     assert len(ds) == 4
 
-    # Test language filtering: keep fi
-    from sulku.dataset.reader import language_filter, min_words_filter, non_empty_filter
-
-    fi_ds = ds.filter(language_filter("fi"))
-    # Should keep art1, art3, art4
+    # Test language filtering with mixin: keep fi
+    fi_ds = ds.filter_language("fi")
+    assert isinstance(fi_ds, FileDataset)
     assert len(fi_ds) == 3
     names = {item.path.name for item in fi_ds}
     assert names == {"art1.md", "art3.md", "art4.md"}
 
     # Test language filtering with collection: keep [fi, sv]
-    fi_sv_ds = ds.filter(language_filter(["fi", "sv"]))
+    fi_sv_ds = ds.filter_language(["fi", "sv"])
     assert len(fi_sv_ds) == 4
 
-    # Test min_words_filter: keep >= 50 words
-    long_ds = ds.filter(min_words_filter(50))
-    # Should keep art1 (60) and art2 (120)
+    # Test filter_min_words mixin: keep >= 50 words
+    long_ds = ds.filter_min_words(50)
+    assert isinstance(long_ds, FileDataset)
     assert len(long_ds) == 2
     names = {item.path.name for item in long_ds}
     assert names == {"art1.md", "art2.md"}
 
-    # Test non_empty_filter: keep > 0 words
-    non_empty_ds = ds.filter(non_empty_filter())
-    # Should keep art1, art2, art3 (art4 is empty)
+    # Test filter_non_empty mixin: keep > 0 words
+    non_empty_ds = ds.filter_non_empty()
     assert len(non_empty_ds) == 3
     names = {item.path.name for item in non_empty_ds}
     assert names == {"art1.md", "art2.md", "art3.md"}
 
-    # Chain filters: FI language and not empty and >= 50 words
+    # Chain mixin filters: FI language and non-empty and >= 50 words
     chained_ds = (
-        ds.filter(language_filter("fi"))
-        .filter(non_empty_filter())
-        .filter(min_words_filter(50))
+        ds.filter_language("fi")
+        .filter_non_empty()
+        .filter_min_words(50)
     )
-    # Should keep only art1
+    assert isinstance(chained_ds, FileDataset)
     assert len(chained_ds) == 1
     assert chained_ds[0].path.name == "art1.md"
+
+    # Test filter accepting list of predicates
+    from sulku.dataset.reader import language_filter, min_words_filter, non_empty_filter
+
+    multi_filtered = ds.filter([language_filter("fi"), non_empty_filter(), min_words_filter(50)])
+    assert isinstance(multi_filtered, FileDataset)
+    assert len(multi_filtered) == 1
+    assert multi_filtered[0].path.name == "art1.md"

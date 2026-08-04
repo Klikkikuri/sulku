@@ -60,11 +60,16 @@ dev = [
     "black>=26.5.1",
     "httpx>=0.28.1",
     "ipykernel>=7.3.0",
+    "nbconvert>=7.17.1",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
     "requests>=2.34.2",
     "ruff>=0.15.22",
     "spacy>=3.8.14",
+]
+training = [
+    "ipykernel>=7.3.0",
+    "ipywidgets>=8.1.8",
 ]
 
 [tool.pytest.ini_options]

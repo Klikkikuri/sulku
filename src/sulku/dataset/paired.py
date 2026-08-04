@@ -7,13 +7,18 @@ allowing simultaneous access to both source news articles and their generated
 synthetic counterparts for model training and evaluation.
 """
 
-import random
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable, Iterator, NamedTuple, Optional, Union, overload
+from typing import TYPE_CHECKING, Any, Callable, Iterable, NamedTuple, Optional, Union
 
 from sulku.bootstrap import get_dest_dir_base, get_source_dir
-from sulku.dataset.reader import DatasetItem, yaml_front_matter_loader
+from sulku.constants import LABEL_AI, LABEL_HUMAN
+from sulku.dataset.base import BaseDataset
+from sulku.dataset.mixins import TextDatasetFilterMixin
+from sulku.dataset.reader import DatasetItem, FileDataset, yaml_front_matter_loader
+from sulku.utils import count_words, sentencize, strip_markdown
+
+if TYPE_CHECKING:
+    from sulku.models import ModelMetadata
 
 
 class ItemPair(NamedTuple):
@@ -24,70 +29,16 @@ class ItemPair(NamedTuple):
     source: DatasetItem
     synthetic: DatasetItem
 
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self.source.metadata
 
-class DatasetItemSequence(Sequence[DatasetItem]):
-    """
-    A read-only sequence of DatasetItem objects.
-
-    Allows lazy instantiation of DatasetItem instances when indexed or sliced.
-    """
-
-    def __init__(
-        self,
-        paths: list[Path],
-        metadata_loader: Optional[Callable[[Path], dict[str, Any]]] = None,
-    ):
-        """
-        Initialize the dataset item sequence.
-
-        :param paths: List of file paths.
-        :type paths: list[Path]
-        :param metadata_loader: Optional callable to load metadata lazily.
-        :type metadata_loader: Callable[[Path], dict[str, Any]], optional
-        """
-        self._paths = paths
-        self._metadata_loader = metadata_loader if metadata_loader is not None else yaml_front_matter_loader
-
-    def __len__(self) -> int:
-        """
-        Return the number of items in the sequence.
-
-        :return: Number of items.
-        :rtype: int
-        """
-        return len(self._paths)
-
-    @overload
-    def __getitem__(self, index: int) -> DatasetItem: ...
-
-    @overload
-    def __getitem__(self, index: slice) -> list[DatasetItem]: ...
-
-    def __getitem__(self, index: Union[int, slice]) -> Union[DatasetItem, list[DatasetItem]]:
-        """
-        Get dataset items by index or slice.
-
-        :param index: The index or slice.
-        :type index: Union[int, slice]
-        :return: DatasetItem if index is int, list of DatasetItems if slice.
-        :rtype: Union[DatasetItem, list[DatasetItem]]
-        """
-        if isinstance(index, slice):
-            return [DatasetItem(path, self._metadata_loader) for path in self._paths[index]]
-        return DatasetItem(self._paths[index], self._metadata_loader)
-
-    def __iter__(self) -> Iterator[DatasetItem]:
-        """
-        Iterate over the dataset items.
-
-        :return: Iterator of DatasetItem instances.
-        :rtype: Iterator[DatasetItem]
-        """
-        for path in self._paths:
-            yield DatasetItem(path, self._metadata_loader)
+    @property
+    def content(self) -> str:
+        return self.source.content
 
 
-class PairedDataset(Sequence[ItemPair]):
+class PairedDataset(BaseDataset[tuple[Path, Path], ItemPair], TextDatasetFilterMixin):
     """
     A dataset of paired source and synthetic articles.
 
@@ -103,6 +54,7 @@ class PairedDataset(Sequence[ItemPair]):
         recursive: bool = True,
         source_metadata_loader: Optional[Callable[[Path], dict[str, Any]]] = None,
         synth_metadata_loader: Optional[Callable[[Path], dict[str, Any]]] = None,
+        _paired_paths: Optional[list[tuple[Path, Path]]] = None,
     ):
         """
         Initialize the paired dataset.
@@ -121,6 +73,7 @@ class PairedDataset(Sequence[ItemPair]):
         :type source_metadata_loader: Callable[[Path], dict[str, Any]], optional
         :param synth_metadata_loader: Optional loader for synthetic article metadata.
         :type synth_metadata_loader: Callable[[Path], dict[str, Any]], optional
+        :param _paired_paths: Internal parameter to pass pre-discovered paired file paths.
         """
         self.source_dir = Path(source_dir).resolve()
         self.synthetic_dir = Path(synthetic_dir).resolve()
@@ -133,154 +86,106 @@ class PairedDataset(Sequence[ItemPair]):
             synth_metadata_loader if synth_metadata_loader is not None else yaml_front_matter_loader
         )
 
-        # Discover all files in synthetic directory
-        if self.recursive:
-            synth_discovered = self.synthetic_dir.glob(f"**/{self.pattern}")
+        if _paired_paths is None:
+            if self.recursive:
+                synth_discovered = self.synthetic_dir.glob(f"**/{self.pattern}")
+            else:
+                synth_discovered = self.synthetic_dir.glob(self.pattern)
+
+            synth_files = sorted([f for f in synth_discovered if f.is_file()])
+
+            paired_paths: list[tuple[Path, Path]] = []
+            for synth_file in synth_files:
+                rel_path = synth_file.relative_to(self.synthetic_dir)
+                source_file = self.source_dir / rel_path
+                if source_file.exists() and source_file.is_file():
+                    paired_paths.append((source_file, synth_file))
+            self.paired_paths = paired_paths
         else:
-            synth_discovered = self.synthetic_dir.glob(self.pattern)
+            self.paired_paths = _paired_paths
 
-        synth_files = sorted([f for f in synth_discovered if f.is_file()])
+        def loader(paths: tuple[Path, Path]) -> ItemPair:
+            return ItemPair(
+                source=DatasetItem(paths[0], self.source_metadata_loader),
+                synthetic=DatasetItem(paths[1], self.synth_metadata_loader),
+            )
 
-        # Match synthetic files with source files
-        self.paired_paths: list[tuple[Path, Path]] = []
-        for synth_file in synth_files:
-            rel_path = synth_file.relative_to(self.synthetic_dir)
-            source_file = self.source_dir / rel_path
-            if source_file.exists() and source_file.is_file():
-                self.paired_paths.append((source_file, synth_file))
+        super().__init__(self.paired_paths, loader)
 
-    def __len__(self) -> int:
+    def _clone(self, items: list[tuple[Path, Path]]) -> "PairedDataset":
         """
-        Return the number of paired articles.
+        Return a new PairedDataset instance with the given list of paired file paths.
 
-        :return: Number of pairs.
-        :rtype: int
+        :param items: List of tuples (source_path, synth_path).
+        :return: A new PairedDataset instance.
         """
-        return len(self.paired_paths)
-
-    @property
-    def source(self) -> DatasetItemSequence:
-        """
-        Get a sequence of the source articles in the paired dataset.
-
-        :return: A sequence of DatasetItems.
-        :rtype: DatasetItemSequence
-        """
-        source_paths = [src for src, _ in self.paired_paths]
-        return DatasetItemSequence(source_paths, self.source_metadata_loader)
-
-    @property
-    def synthetic(self) -> DatasetItemSequence:
-        """
-        Get a sequence of the synthetic articles in the paired dataset.
-
-        :return: A sequence of DatasetItems.
-        :rtype: DatasetItemSequence
-        """
-        synth_paths = [synth for _, synth in self.paired_paths]
-        return DatasetItemSequence(synth_paths, self.synth_metadata_loader)
-
-    @overload
-    def __getitem__(self, index: int) -> ItemPair: ...
-
-    @overload
-    def __getitem__(self, index: slice) -> list[ItemPair]: ...
-
-    def __getitem__(self, index: Union[int, slice]) -> Union[ItemPair, list[ItemPair]]:
-        """
-        Get a pair (or list of pairs) of source and synthetic articles.
-
-        :param index: The index or slice.
-        :type index: Union[int, slice]
-        :return: A ItemPair containing the corresponding DatasetItems,
-            or a list of ItemPairs if sliced.
-        :rtype: Union[ItemPair, list[ItemPair]]
-        """
-        if isinstance(index, slice):
-            return [
-                ItemPair(
-                    source=DatasetItem(src, self.source_metadata_loader),
-                    synthetic=DatasetItem(syn, self.synth_metadata_loader),
-                )
-                for src, syn in self.paired_paths[index]
-            ]
-        src, syn = self.paired_paths[index]
-        return ItemPair(
-            source=DatasetItem(src, self.source_metadata_loader),
-            synthetic=DatasetItem(syn, self.synth_metadata_loader),
+        return PairedDataset(
+            source_dir=self.source_dir,
+            synthetic_dir=self.synthetic_dir,
+            pattern=self.pattern,
+            recursive=self.recursive,
+            source_metadata_loader=self.source_metadata_loader,
+            synth_metadata_loader=self.synth_metadata_loader,
+            _paired_paths=items,
         )
 
-    def __iter__(self) -> Iterator[ItemPair]:
+    @property
+    def source(self) -> FileDataset:
         """
-        Iterate over the paired dataset items.
+        Get a FileDataset of the source articles in the paired dataset.
 
-        :return: Iterator of ItemPair objects containing source and synthetic items.
-        :rtype: Iterator[ItemPair]
+        :return: FileDataset of source items.
         """
-        for src, syn in self.paired_paths:
-            yield ItemPair(
-                source=DatasetItem(src, self.source_metadata_loader),
-                synthetic=DatasetItem(syn, self.synth_metadata_loader),
-            )
+        source_paths = [src for src, _ in self.paired_paths]
+        return FileDataset(
+            root_path=self.source_dir,
+            pattern=self.pattern,
+            recursive=self.recursive,
+            metadata_loader=self.source_metadata_loader,
+            _files=source_paths,
+        )
 
-    def sample(self, k: int, seed: Optional[int] = None) -> list[ItemPair]:
+    @property
+    def synthetic(self) -> FileDataset:
         """
-        Get a random sample of k paired dataset items.
+        Get a FileDataset of the synthetic articles in the paired dataset.
 
-        :param k: Number of items to sample.
-        :type k: int
-        :param seed: Optional random seed for reproducibility.
-        :type seed: int, optional
-        :return: List of sampled ItemPairs.
-        :rtype: list[ItemPair]
-        :raises ValueError: If sample size k is larger than the dataset.
+        :return: FileDataset of synthetic items.
         """
-        if k > len(self):
-            raise ValueError(f"Sample size {k} is larger than dataset size {len(self)}")
+        synth_paths = [synth for _, synth in self.paired_paths]
+        return FileDataset(
+            root_path=self.synthetic_dir,
+            pattern=self.pattern,
+            recursive=self.recursive,
+            metadata_loader=self.synth_metadata_loader,
+            _files=synth_paths,
+        )
 
-        if seed is not None:
-            rng = random.Random(seed)
-            sampled_paths = rng.sample(self.paired_paths, k)
-        else:
-            sampled_paths = random.sample(self.paired_paths, k)
-
-        return [
-            ItemPair(
-                source=DatasetItem(src, self.source_metadata_loader),
-                synthetic=DatasetItem(syn, self.synth_metadata_loader),
-            )
-            for src, syn in sampled_paths
-        ]
-
-    def filter(self, predicate: Callable[[ItemPair], bool]) -> "PairedDataset":
+    def to_fasttext(
+        self,
+        output_path: Union[str, Path],
+        model_metadata: Optional["ModelMetadata"] = None,
+        lang: str = "fi",
+        min_word_count: int = 4,
+        mode: str = "w",
+    ) -> None:
         """
-        Return a new PairedDataset containing only items that match the predicate.
+        Export this PairedDataset to a FastText formatted training file.
 
-        This eagerly evaluates the predicate on all items currently in the dataset.
-
-        :param predicate: A callable that takes a ItemPair and returns a boolean.
-        :type predicate: Callable[[ItemPair], bool]
-        :return: A new filtered PairedDataset instance.
-        :rtype: PairedDataset
+        :param output_path: Destination path for FastText training file.
+        :param model_metadata: Optional ModelMetadata instance supplying target labels.
+        :param lang: Language code for sentencizer. Defaults to 'fi'.
+        :param min_word_count: Minimum words per sentence. Defaults to 4.
+        :param mode: File write mode ('w' to overwrite, 'a' to append).
         """
-        filtered_pairs = []
-        for src, syn in self.paired_paths:
-            item = ItemPair(
-                source=DatasetItem(src, self.source_metadata_loader),
-                synthetic=DatasetItem(syn, self.synth_metadata_loader),
-            )
-            if predicate(item):
-                filtered_pairs.append((src, syn))
-
-        new_ds = PairedDataset.__new__(PairedDataset)
-        new_ds.source_dir = self.source_dir
-        new_ds.synthetic_dir = self.synthetic_dir
-        new_ds.pattern = self.pattern
-        new_ds.recursive = self.recursive
-        new_ds.source_metadata_loader = self.source_metadata_loader
-        new_ds.synth_metadata_loader = self.synth_metadata_loader
-        new_ds.paired_paths = filtered_pairs
-        return new_ds
+        export_paired_dataset_to_fasttext(
+            self,
+            output_path=output_path,
+            model_metadata=model_metadata,
+            lang=lang,
+            min_word_count=min_word_count,
+            mode=mode,
+        )
 
 
 def load_paired_dataset(
@@ -343,7 +248,7 @@ def load_paired_dataset(
 
 
 def generate_fasttext_sentence_data(
-    items: Sequence[DatasetItem],
+    items: Iterable[DatasetItem],
     label: str,
     output_path: Union[str, Path],
     lang: str = "fi",
@@ -353,27 +258,17 @@ def generate_fasttext_sentence_data(
     """
     Generate FastText formatted sentence training data from a sequence of markdown articles.
 
-    Each document's YAML front matter and markdown formatting are stripped. Then, the
-    plain text is split into sentences using standard sentencize. Valid sentences with
-    word counts meeting or exceeding min_word_count are written to output_path.
-
-    :param items: Sequence of DatasetItem objects containing markdown articles.
-    :type items: Sequence[DatasetItem]
+    :param items: Iterable of DatasetItem objects containing markdown articles.
     :param label: Class label to prefix each sentence with (e.g. 'human', 'synthetic').
-    :type label: str
     :param output_path: Path to the output text file where FastText data will be written.
-    :type output_path: Union[str, Path]
     :param lang: Language code for tokenizer/sentencizer. Defaults to 'fi'.
-    :type lang: str
     :param min_word_count: Minimum words in a sentence to keep it in training. Defaults to 4.
-    :type min_word_count: int
     :param mode: File open mode, 'w' to overwrite or 'a' to append. Defaults to 'a'.
-    :type mode: str
     """
-    from sulku.utils import count_words, sentencize, strip_markdown
-
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fasttext_label = label if label.startswith("__label__") else f"__label__{label}"
 
     with open(out_path, mode, encoding="utf-8") as f:
         for item in items:
@@ -383,6 +278,48 @@ def generate_fasttext_sentence_data(
             for sentence in sentences:
                 sentence_cleaned = " ".join(sentence.split())
                 if count_words(sentence_cleaned) >= min_word_count:
-                    fasttext_label = label if label.startswith("__label__") else f"__label__{label}"
                     f.write(f"{fasttext_label} {sentence_cleaned}\n")
 
+
+def export_paired_dataset_to_fasttext(
+    dataset: PairedDataset,
+    output_path: Union[str, Path],
+    model_metadata: Optional["ModelMetadata"] = None,
+    lang: str = "fi",
+    min_word_count: int = 4,
+    mode: str = "w",
+) -> None:
+    """
+    Export a PairedDataset directly to a FastText training file, optionally using labels
+    from a ModelMetadata specification.
+
+    :param dataset: PairedDataset instance.
+    :param output_path: Destination path for FastText training file.
+    :param model_metadata: Optional ModelMetadata instance supplying target class labels.
+    :param lang: Language code for sentencizer. Defaults to 'fi'.
+    :param min_word_count: Minimum words per sentence. Defaults to 4.
+    :param mode: File write mode ('w' to overwrite, 'a' to append).
+    """
+    if model_metadata and model_metadata.labels:
+        human_label = model_metadata.labels.get("human", LABEL_HUMAN)
+        ai_label = model_metadata.labels.get("ai", LABEL_AI)
+    else:
+        human_label = LABEL_HUMAN
+        ai_label = LABEL_AI
+
+    generate_fasttext_sentence_data(
+        dataset.source,
+        label=human_label,
+        output_path=output_path,
+        lang=lang,
+        min_word_count=min_word_count,
+        mode=mode,
+    )
+    generate_fasttext_sentence_data(
+        dataset.synthetic,
+        label=ai_label,
+        output_path=output_path,
+        lang=lang,
+        min_word_count=min_word_count,
+        mode="a",
+    )
