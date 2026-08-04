@@ -49,8 +49,6 @@ line_length = 120
 requires = ["uv_build>=0.9.17,<0.10.0"]
 build-backend = "uv_build"
 
-[tool.uv.workspace]
-members = ["packages/*"]
 
 [tool.uv.sources]
 niitti = { workspace = true }
