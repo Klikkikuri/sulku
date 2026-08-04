@@ -11,16 +11,31 @@ their own, preventing duplicate-registration errors.
 Prometheus metrics are exposed at ``GET /metrics`` via the FastAPI app.
 """
 
+from __future__ import annotations
+
 import time as _time
+from typing import TYPE_CHECKING
 from opentelemetry import metrics as otel_metrics
 from opentelemetry.metrics import CallbackOptions, Observation
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
 
+if TYPE_CHECKING:
+    from sulku.prediction import PredictionService
+
 _reader = PrometheusMetricReader()
 _provider = MeterProvider(metric_readers=[_reader])
 otel_metrics.set_meter_provider(_provider)
 meter = otel_metrics.get_meter("sulku", version="0.1.0")
+
+# Live PredictionService reference wired from lifespan via set_metrics_service()
+_service_ref: PredictionService | None = None
+
+
+def set_metrics_service(svc: PredictionService) -> None:
+    """Wire the live ``PredictionService`` to observable-gauge callbacks."""
+    global _service_ref
+    _service_ref = svc
 
 
 # ── Observable gauge callbacks ────────────────────────────────────────────────
@@ -29,17 +44,20 @@ meter = otel_metrics.get_meter("sulku", version="0.1.0")
 
 
 def _model_loaded_cb(opts: CallbackOptions):
-    from sulku.prediction import prediction_service
-    from sulku.constants import MODEL_PATHS
-    for name in MODEL_PATHS:
-        yield Observation(1 if name in prediction_service.models else 0, {"model": name})
+    svc = _service_ref
+    if svc is None:
+        return
+    for name in svc.store.model_names:
+        yield Observation(1 if name in svc.models else 0, {"model": name})
 
 
 def _model_last_used_cb(opts: CallbackOptions):
-    from sulku.prediction import prediction_service
+    svc = _service_ref
+    if svc is None:
+        return
     now_mono = _time.monotonic()
     now_wall = _time.time()
-    for name, mono in prediction_service._last_used.items():
+    for name, mono in svc._last_used.items():
         yield Observation(now_wall - (now_mono - mono), {"model": name})
 
 

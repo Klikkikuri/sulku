@@ -225,7 +225,7 @@ def test_create_synthetic_article_rejection(mock_create_client, mock_article, mo
     mock_client.chat.completions.create.return_value = mock_response
 
     with pytest.raises(ValueError) as excinfo:
-        create_synthetic_article(article=mock_article, summary=mock_summary)
+        create_synthetic_article(article=mock_article, summary=mock_summary, model="gemini-3.1-flash-lite")
     assert "rejected by the model: Safety violation" in str(excinfo.value)
 
 

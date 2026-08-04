@@ -38,9 +38,9 @@ def main(log_level: str, debug: bool) -> None:
     level_name = "DEBUG" if debug else log_level.upper()
     from sulku.bootstrap import Settings, setup
 
-    # Activate setup context for CLI execution
-    setup_ctx = setup(Settings(log_level=level_name, service_name="sulku-cli"))
-    setup_ctx.__enter__()
+    # Activate setup context for CLI execution; with_resource ensures teardown on exit
+    ctx = click.get_current_context()
+    _, _ = ctx.with_resource(setup(Settings(log_level=level_name, service_name="sulku-cli")))
 
 
 # Register subcommands

@@ -36,10 +36,9 @@ from sulku.constants import (
     DEFAULT_Z_THRESHOLD,
     LABEL_AI,
     LABEL_HUMAN,
-    MODEL_CALIBRATION,
-    MODEL_PATHS,
 )
 from sulku.metrics import model_in_flight, model_loads, model_unloads
+from sulku.models import ModelPackage, ModelStore
 from sulku.utils import parse_paragraphs_and_sentences
 
 # Monkey-patch fasttext for NumPy 2.x compatibility
@@ -246,8 +245,10 @@ class PredictionService:
     default_keep_alive: float = 300.0
     min_loaded_time: float = 60.0  # cooldown — no eviction within N s of load
 
-    def __init__(self) -> None:
+    def __init__(self, store: ModelStore) -> None:
+        self.store: ModelStore = store
         self.models: Dict[str, fasttext.FastText._FastText] = {}
+        self.packages: Dict[str, ModelPackage] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
         self._last_used: Dict[str, float] = {}
         self._loaded_at: Dict[str, float] = {}
@@ -289,6 +290,7 @@ class PredictionService:
         if name not in self.models:
             return
         del self.models[name]
+        self.packages.pop(name, None)
         self._last_used.pop(name, None)
         self._loaded_at.pop(name, None)
         self._keep_alive.pop(name, None)
@@ -311,8 +313,11 @@ class PredictionService:
                 self._update_adaptive_ttl(name, elapsed)
             self._last_used[name] = now
             return
-        if name not in MODEL_PATHS:
+
+        spec = self.store.get_spec(name)
+        if not spec:
             raise KeyError(f"Unknown model '{name}'.")
+
         if name not in self._locks:
             self._locks[name] = asyncio.Lock()
         async with self._locks[name]:
@@ -322,17 +327,19 @@ class PredictionService:
                     self._update_adaptive_ttl(name, elapsed)
                 self._last_used[name] = now
                 return
-            path = MODEL_PATHS[name]
+
+            package = self.store.get(name)
             loop = asyncio.get_running_loop()
             model = await loop.run_in_executor(
-                _load_executor, fasttext.load_model, str(path.resolve().absolute())
+                _load_executor, fasttext.load_model, str(package.path.resolve().absolute())
             )
             self.models[name] = model
+            self.packages[name] = package
             self._last_used[name] = now
             self._loaded_at[name] = now
             self._in_flight[name] = 0
             model_loads.add(1, {"model": name})
-            logger.info("model=%s loaded", name)
+            logger.info("model=%s loaded from %s", name, package.path)
 
     @contextlib.contextmanager
     def track_in_flight(self, name: str):
@@ -344,17 +351,6 @@ class PredictionService:
         finally:
             self._in_flight[name] = max(0, self._in_flight.get(name, 1) - 1)
             model_in_flight.add(-1, {"model": name})
-
-    def load_models(self) -> None:
-        """Load configured fastText models into memory."""
-        now = time.monotonic()
-        for model_name, model_path in MODEL_PATHS.items():
-            if model_name not in self.models:
-                self.models[model_name] = fasttext.load_model(str(model_path.resolve().absolute()))
-                self._last_used[model_name] = now
-                self._loaded_at[model_name] = now
-                self._in_flight[model_name] = 0
-                model_loads.add(1, {"model": model_name})
 
     def clear_models(self) -> None:
         """Clear all loaded fastText models from memory."""
@@ -449,7 +445,11 @@ class PredictionService:
         clipped_z_sum = 0.0
 
         for name, model_score in sorted(predictions.items()):
-            mean, std = MODEL_CALIBRATION.get(name, (DEFAULT_HUMAN_MEAN, DEFAULT_HUMAN_STD))
+            pkg = self.packages.get(name)
+            if pkg is None and self.store.get_spec(name):
+                pkg = self.store.get(name)
+            mean = pkg.metadata.mean if pkg else DEFAULT_HUMAN_MEAN
+            std = pkg.metadata.std if pkg else DEFAULT_HUMAN_STD
             std_val = std if std > 1e-6 else 1e-6
             z = (model_score - mean) / std_val
             z_scores[name] = float(z)
@@ -527,9 +527,3 @@ class PredictionService:
             z_scores=z_scores,
             paragraphs=paragraphs_details,
         )
-
-
-
-prediction_service = PredictionService()
-
-

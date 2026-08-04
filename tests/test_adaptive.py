@@ -39,9 +39,11 @@ def test_ewma_rate_threshold_crossing(monkeypatch):
     assert rate.rate >= 0.01
 
 
-def test_adaptive_ttl_update():
+def test_adaptive_ttl_update(tmp_path):
     """Verify _update_adaptive_ttl updates keep_alive based on inter-request interval."""
-    service = PredictionService()
+    from sulku.models import ModelStore
+    store = ModelStore(models=[], cache_dir=tmp_path)
+    service = PredictionService(store=store)
     model_name = "test_model"
     service.default_keep_alive = 300.0
 
@@ -61,10 +63,14 @@ def test_adaptive_ttl_update():
 @pytest.mark.anyio
 async def test_ensure_loaded_calls_adaptive_ttl(monkeypatch):
     """Verify ensure_loaded invokes _update_adaptive_ttl on subsequent requests."""
-    service = PredictionService()
     model_name = "test_model"
+    mock_store = MagicMock()
+    mock_package = MagicMock()
+    mock_package.path = MagicMock()
+    mock_store.get_spec.return_value = MagicMock()
+    mock_store.get.return_value = mock_package
 
-    monkeypatch.setattr("sulku.prediction.MODEL_PATHS", {model_name: MagicMock()})
+    service = PredictionService(store=mock_store)
     monkeypatch.setattr("fasttext.load_model", lambda path: MagicMock())
 
     now = 100.0

@@ -7,7 +7,6 @@ This module defines the CLI command to run AI text detection on a file or URL.
 
 from pathlib import Path
 import sys
-from typing import Tuple
 
 import click
 import httpx
@@ -16,28 +15,7 @@ import trafilatura
 from sulku.utils import prepare_input
 
 
-def fetch_url_content(url: str) -> str:
-
-    """
-    Fetch webpage content and convert it to markdown.
-
-    :param url: The URL of the webpage to fetch.
-    :raises RuntimeError: If fetching or extraction fails.
-    :return: The extracted markdown content.
-    """
-    click.echo(f"Fetching content from {url}...")
-    downloaded = trafilatura.fetch_url(url)
-    if not downloaded:
-        raise RuntimeError(f"Failed to fetch content from URL {url}")
-
-    content = trafilatura.extract(downloaded, output_format="markdown")
-    if not content:
-        raise RuntimeError(f"Failed to extract markdown content from URL {url}")
-
-    return content
-
-
-def read_file_content(file_path: Path) -> Tuple[str, str]:
+def read_file_content(file_path: Path) -> tuple[str, str]:
     """
     Read file content and detect its mime content type.
 
@@ -85,15 +63,6 @@ def read_file_content(file_path: Path) -> Tuple[str, str]:
 
     return content, content_type
 
-
-def load_input(path_or_url: str) -> Tuple[str, str, str]:
-    """
-    Load content from either a raw string, local file path, or remote URL.
-
-    :param path_or_url: Text string, file path, or URL.
-    :return: A tuple of (content, content_type, display_name).
-    """
-    return prepare_input(path_or_url)
 
 
 def detect_text(api_url: str, content: str, content_type: str) -> dict:
@@ -174,7 +143,9 @@ def detect_cmd(path_or_url: str, url: str) -> None:
     before sending to the aidetect service.
     """
     try:
-        content, content_type, display_name = load_input(path_or_url)
+        if path_or_url.startswith(("http://", "https://")):
+            click.echo(f"Fetching content from {path_or_url}...")
+        content, content_type, display_name = prepare_input(path_or_url)
         click.echo(f"Sending {display_name} to aidetect service at {url}...")
         result = detect_text(url, content, content_type)
         print_detection_result(display_name, result)

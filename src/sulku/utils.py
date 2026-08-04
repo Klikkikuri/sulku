@@ -228,10 +228,8 @@ def fetch_url_content(url: str) -> str:
     :raises RuntimeError: If fetching or extraction fails.
     :return: The extracted markdown content.
     """
-    import click
     import trafilatura
 
-    click.echo(f"Fetching content from {url}...")
     downloaded = trafilatura.fetch_url(url)
     if not downloaded:
         raise RuntimeError(f"Failed to fetch content from URL {url}")

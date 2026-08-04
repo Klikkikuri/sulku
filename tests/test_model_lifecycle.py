@@ -13,11 +13,16 @@ from sulku.prediction import PredictionService
 @pytest.mark.anyio
 async def test_ensure_loaded_and_idempotent(monkeypatch):
     """Verify ensure_loaded loads model and concurrent calls are idempotent."""
-    service = PredictionService()
+    mock_store = MagicMock()
+    mock_package = MagicMock()
+    mock_package.path = MagicMock()
+    mock_package.path.exists.return_value = True
+    mock_store.get_spec.return_value = MagicMock()
+    mock_store.get.return_value = mock_package
+
+    service = PredictionService(store=mock_store)
     dummy_model = MagicMock()
 
-    # Mock fasttext.load_model and MODEL_PATHS
-    monkeypatch.setattr("sulku.prediction.MODEL_PATHS", {"mock_model": MagicMock()})
     monkeypatch.setattr("fasttext.load_model", lambda path: dummy_model)
 
     # First load
@@ -39,14 +44,18 @@ async def test_ensure_loaded_and_idempotent(monkeypatch):
 @pytest.mark.anyio
 async def test_ensure_loaded_unknown_model():
     """Verify ensure_loaded raises KeyError for invalid model names."""
-    service = PredictionService()
+    mock_store = MagicMock()
+    mock_store.get_spec.return_value = None
+    service = PredictionService(store=mock_store)
     with pytest.raises(KeyError, match="Unknown model"):
         await service.ensure_loaded("non_existent_model")
 
 
-def test_evict_model_and_unload_model():
+def test_evict_model_and_unload_model(tmp_path):
     """Verify evict_model cleans up internal tracking state and unload_model enforces existence."""
-    service = PredictionService()
+    from sulku.models import ModelStore
+    store = ModelStore(models=[], cache_dir=tmp_path)
+    service = PredictionService(store=store)
     service.models["test_model"] = MagicMock()
     service._last_used["test_model"] = 100.0
     service._loaded_at["test_model"] = 50.0
@@ -74,9 +83,11 @@ def test_evict_model_and_unload_model():
     assert "test_model_2" not in service.models
 
 
-def test_ref_counting_track_in_flight():
+def test_ref_counting_track_in_flight(tmp_path):
     """Verify track_in_flight context manager updates in_flight counters correctly."""
-    service = PredictionService()
+    from sulku.models import ModelStore
+    store = ModelStore(models=[], cache_dir=tmp_path)
+    service = PredictionService(store=store)
     name = "m1"
 
     assert service._in_flight.get(name, 0) == 0
@@ -90,9 +101,11 @@ def test_ref_counting_track_in_flight():
     assert service._in_flight[name] == 0
 
 
-def test_get_keep_alive_fallback():
+def test_get_keep_alive_fallback(tmp_path):
     """Verify get_keep_alive respects per-model TTL overrides and defaults."""
-    service = PredictionService()
+    from sulku.models import ModelStore
+    store = ModelStore(models=[], cache_dir=tmp_path)
+    service = PredictionService(store=store)
     assert service.get_keep_alive("model_a") == 300.0
 
     service._keep_alive["model_a"] = 60.0
@@ -101,13 +114,17 @@ def test_get_keep_alive_fallback():
 
 
 @pytest.mark.anyio
-async def test_api_load_unload(monkeypatch):
+async def test_api_load_unload(monkeypatch, tmp_path):
     """Round-trip test for model load/unload API endpoints."""
     from fastapi.testclient import TestClient
     from sulku.http import create_app
 
     mock_model = MagicMock()
     monkeypatch.setattr("fasttext.load_model", lambda path: mock_model)
+
+    dummy_model_file = tmp_path / "gemini-3.1-flash-lite.ftz"
+    dummy_model_file.touch()
+    monkeypatch.setenv("SULKU_MODELS", f'[{{"name": "gemini-3.1-flash-lite", "source": "{dummy_model_file}"}}]')
 
     with TestClient(create_app()) as client:
         # Initial status: not loaded
@@ -141,7 +158,7 @@ def test_metrics_endpoint():
     from sulku.http import create_app
 
     with TestClient(create_app()) as client:
-        resp = client.get("/metrics")
+        resp = client.get("/metrics/")
         assert resp.status_code == 200
         assert "sulku_model_loads_total" in resp.text
 

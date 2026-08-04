@@ -9,17 +9,19 @@ to the prediction module.
 
 import asyncio
 import os
-from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
+from typing import Any
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import asynccontextmanager
 from pydantic import BaseModel, Field
 
-from sulku.bootstrap import setup
+from sulku.bootstrap import Settings, setup
 from sulku.concurrency import ClassifySemaphore, EWMARate
 from sulku.eviction import eviction_loop
-from sulku.metrics import requests_shed
+from sulku.metrics import requests_shed, set_metrics_service
+from sulku.models import ModelStore
+from sulku.prediction import PredictionService
 from sulku.wpapi import wpapi_router
 from .constants import DEFAULT_ALPHA, DEFAULT_P_STAY
-from sulku.prediction import prediction_service
 from sulku.utils import parse_paragraphs_and_sentences, strip_markdown
 
 from niitti import get_logger
@@ -32,21 +34,43 @@ _rate = EWMARate(half_life=30.0)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    with setup() as settings:
-        prediction_service.default_keep_alive = settings.keep_alive
+    with setup() as (settings, store):
+        svc = PredictionService(store=store)
+        svc.default_keep_alive = settings.keep_alive
         _semaphore.max_queue = settings.max_queue
         _semaphore._sem = asyncio.Semaphore(settings.max_concurrent)
+
+        app.state.settings = settings
+        app.state.model_store = store
+        app.state.prediction_service = svc
+        set_metrics_service(svc)
+
         preload = getattr(app.state, "preload", settings.preload)
         if preload:
-            prediction_service.load_models()
+            await asyncio.gather(*[svc.ensure_loaded(n) for n in store.model_names])
         task = asyncio.create_task(
-            eviction_loop(prediction_service), name="model-eviction"
+            eviction_loop(svc), name="model-eviction"
         )
         try:
             yield
         finally:
             task.cancel()
-            prediction_service.clear_models()
+            svc.clear_models()
+
+
+def get_app_settings(request: Request) -> Settings:
+    """FastAPI Dependency: get active Settings from app state."""
+    return request.app.state.settings
+
+
+def get_app_model_store(request: Request) -> ModelStore:
+    """FastAPI Dependency: get active ModelStore from app state."""
+    return request.app.state.model_store
+
+
+def get_app_prediction_service(request: Request) -> Any:
+    """FastAPI Dependency: get active PredictionService from app state."""
+    return request.app.state.prediction_service
 
 
 class ClassificationRequest(BaseModel):
@@ -102,19 +126,22 @@ router = APIRouter(prefix="/api/v1/aidetect", tags=["classification"])
 
 
 @router.get("/models", response_model=ModelListResponse)
-async def list_models():
+async def list_models(
+    store: ModelStore = Depends(get_app_model_store),
+    pred_svc: Any = Depends(get_app_prediction_service),
+):
     """
     List all configured fastText classifier models and their load status.
     """
-    from sulku.constants import MODEL_PATHS
-
     result = []
-    for name, path in MODEL_PATHS.items():
-        is_loaded = name in prediction_service.models
+    for name in store.model_names:
+        is_loaded = name in pred_svc.models
+        spec = store.get_spec(name)
+        path_str = str(spec.source) if spec else ""
         result.append(
             ModelInfo(
                 name=name,
-                path=str(path.resolve().absolute()),
+                path=path_str,
                 loaded=is_loaded,
             )
         )
@@ -122,37 +149,42 @@ async def list_models():
 
 
 @router.post("/models/{name}/load")
-async def load_model(name: str):
+async def load_model(
+    name: str,
+    pred_svc: Any = Depends(get_app_prediction_service),
+):
     """
     Explicitly load a model into memory.
     """
-    from sulku.constants import MODEL_PATHS
-
-    if name not in MODEL_PATHS:
+    try:
+        await pred_svc.ensure_loaded(name)
+    except KeyError:
         raise HTTPException(404, f"Unknown model '{name}'.")
-    await prediction_service.ensure_loaded(name)
     return {"model": name, "loaded": True}
 
 
 @router.post("/models/{name}/unload")
-async def unload_model_endpoint(name: str):
+async def unload_model_endpoint(
+    name: str,
+    pred_svc: Any = Depends(get_app_prediction_service),
+):
     """
     Explicitly unload a model from memory.
     """
     try:
-        prediction_service.unload_model(name)
+        pred_svc.unload_model(name)
     except KeyError:
         raise HTTPException(404, f"Model '{name}' is not loaded.")
     return {"model": name, "loaded": False}
 
 
 @router.patch("/models/keep-alive")
-async def set_keep_alive(body: KeepAliveRequest):
+async def set_keep_alive(body: KeepAliveRequest, pred_svc: Any = Depends(get_app_prediction_service)):
     """
     Update default idle TTL across all models.
     """
-    prediction_service.default_keep_alive = body.seconds
-    return {"keep_alive": prediction_service.default_keep_alive}
+    pred_svc.default_keep_alive = body.seconds
+    return {"keep_alive": pred_svc.default_keep_alive}
 
 
 def verify_plain_text(body_bytes: bytes) -> None:
@@ -177,11 +209,6 @@ def verify_plain_text(body_bytes: bytes) -> None:
         )
 
 
-async def _preload_all() -> None:
-    from sulku.constants import MODEL_PATHS
-    for name in MODEL_PATHS:
-        await prediction_service.ensure_loaded(name)
-
 
 @router.post("/", response_model=ClassificationResponse)
 async def classify_text(
@@ -192,18 +219,20 @@ async def classify_text(
         None,
         description="Optional list of specific model names to evaluate. Omit to evaluate all loaded models.",
     ),
+    store: ModelStore = Depends(get_app_model_store),
+    pred_svc: Any = Depends(get_app_prediction_service),
 ):
-    from sulku.constants import MODEL_PATHS
-
     # Burst onset: EWMA ticks non-zero -> pre-load all models speculatively
     if _rate.tick():
-        asyncio.create_task(_preload_all())
+        for name in store.model_names:
+            asyncio.create_task(pred_svc.ensure_loaded(name))
 
-    target_names = models if models else list(MODEL_PATHS.keys())
+    target_names = models if models else store.model_names
     for name in target_names:
-        if name not in MODEL_PATHS:
+        try:
+            await pred_svc.ensure_loaded(name)
+        except KeyError:
             raise HTTPException(422, f"Unknown model '{name}'.")
-        await prediction_service.ensure_loaded(name)
 
     content_type = req.headers.get("content-type", "")
     main_type = (
@@ -266,7 +295,7 @@ async def classify_text(
     try:
         async with _semaphore:
             with logger.span("classify_text_endpoint", p_stay=p_stay, alpha=alpha):
-                res = prediction_service.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha, models=models)
+                res = pred_svc.classify(parsed_paragraphs, p_stay=p_stay, alpha=alpha, models=models)
     except ClassifySemaphore.OverloadError as exc:
         requests_shed.add(1)
         raise HTTPException(

@@ -141,7 +141,7 @@ def test_load_paired_dataset_model_name(temp_paired_dirs):
     """Test load_paired_dataset with model name input, mocking DEFAULT_DEST_DIR_BASE."""
     src_dir, syn_dir = temp_paired_dirs
 
-    with patch("sulku.dataset.paired.DEFAULT_DEST_DIR_BASE", syn_dir.parent):
+    with patch("sulku.dataset.paired.get_dest_dir_base", return_value=syn_dir.parent):
         # The model name is the folder name inside syn_dir's parent
         model_name = syn_dir.name
         ds = load_paired_dataset(path_or_model_name=model_name, source_dir=src_dir)

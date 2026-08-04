@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, Iterator, NamedTuple, Optional, Union, overload
 
-from sulku.constants import DEFAULT_DEST_DIR_BASE, DEFAULT_SOURCE_DIR
+from sulku.bootstrap import get_dest_dir_base, get_source_dir
 from sulku.dataset.reader import DatasetItem, yaml_front_matter_loader
 
 
@@ -316,7 +316,7 @@ def load_paired_dataset(
     if path_obj.exists() and path_obj.is_dir():
         synthetic_dir = path_obj.resolve()
     else:
-        synthetic_dir = (DEFAULT_DEST_DIR_BASE / path_or_model_name).resolve()
+        synthetic_dir = (get_dest_dir_base() / path_or_model_name).resolve()
 
     if not synthetic_dir.exists():
         raise FileNotFoundError(
@@ -325,7 +325,7 @@ def load_paired_dataset(
         )
 
     if source_dir is None:
-        source_dir = DEFAULT_SOURCE_DIR
+        source_dir = get_source_dir()
     else:
         source_dir = Path(source_dir).resolve()
 

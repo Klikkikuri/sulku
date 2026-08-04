@@ -19,17 +19,10 @@ import yaml
 from platformdirs import user_cache_dir
 
 from .models import GenerationDetailsDict, StyleVectorDict, TokenUsageDict
+from sulku.bootstrap import get_dest_dir_base, get_source_dir
 from sulku.dataset.reader import DatasetItem, FileDataset, min_words_filter
 from sulku.summarize.llm import create_synthetic_article, summarize_text
 from sulku.summarize.models import ArticleSummary
-from sulku.constants import (
-    CACHE_APP_AUTHOR,
-    CACHE_APP_NAME,
-    CACHE_SUBDIR,
-    DEFAULT_DEST_DIR_BASE,
-    DEFAULT_MODEL,
-    DEFAULT_SOURCE_DIR,
-)
 
 logger = get_logger(__name__)
 
@@ -44,33 +37,33 @@ class SyntheticDatasetGenerator:
 
     def __init__(
         self,
-        source_dir: Union[str, Path] = DEFAULT_SOURCE_DIR,
-        model_name: str = DEFAULT_MODEL,
+        source_dir: Union[str, Path, None] = None,
+        model_name: str = "gemini-3.1-flash-lite",
         cache_dir: Optional[Union[str, Path]] = None,
     ):
         """
         Initialize the generator.
 
         :param source_dir: Directory containing the source dataset files.
-        :type source_dir: Union[str, Path]
+            If None, resolves from active ``Settings`` (falls back to platformdirs).
+        :type source_dir: Union[str, Path, None]
         :param model_name: Name of the LLM model to use.
         :type model_name: str
         :param cache_dir: Optional path to override the summary cache directory.
             If None, uses platformdirs to resolve user cache directory.
         :type cache_dir: Union[str, Path], optional
         """
-        self.source_dir = Path(source_dir).resolve()
-        if not self.source_dir.exists():
+        resolved_source = Path(source_dir).resolve() if source_dir is not None else get_source_dir()
+        if not resolved_source.exists():
             raise FileNotFoundError(
-                f"Source directory does not exist: {self.source_dir}"
+                f"Source directory does not exist: {resolved_source}"
             )
+        self.source_dir = resolved_source
 
         self.model_name = model_name
 
         if cache_dir is None:
-            self.cache_dir = (
-                Path(user_cache_dir(CACHE_APP_NAME, CACHE_APP_AUTHOR)) / CACHE_SUBDIR
-            )
+            self.cache_dir = Path(user_cache_dir("sulku", "klikkikuri")) / "summaries"
         else:
             self.cache_dir = Path(cache_dir).resolve()
 
@@ -189,7 +182,7 @@ class SyntheticDatasetGenerator:
         :rtype: list[Path]
         """
         if dest_dir is None:
-            dest_path = DEFAULT_DEST_DIR_BASE / self.model_name
+            dest_path = get_dest_dir_base() / self.model_name
         else:
             dest_path = Path(dest_dir).resolve()
 
