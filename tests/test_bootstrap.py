@@ -87,7 +87,7 @@ def test_model_discovery_from_cache(tmp_path):
 
     model2_dir = cache_dir / "model_b"
     model2_dir.mkdir(parents=True)
-    # Missing .ftz file in model_b directory
+    # Missing supported model file in model_b directory
     (model2_dir / "other.txt").touch()
 
     s = Settings(data_dir=tmp_path, model_cache_dir=cache_dir)
@@ -95,6 +95,78 @@ def test_model_discovery_from_cache(tmp_path):
     assert len(s.models) == 1
     assert s.models[0].name == "model_a"
     assert s.models[0].source == model1_dir / "model_a.ftz"
+
+
+def test_model_discovery_from_cache_bin(tmp_path):
+    """Test that .bin model files are discovered if no .ftz file is present."""
+    cache_dir = tmp_path / "models"
+    model_dir = cache_dir / "model_bin"
+    model_dir.mkdir(parents=True)
+    bin_file = model_dir / "model.bin"
+    bin_file.touch()
+
+    s = Settings(data_dir=tmp_path, model_cache_dir=cache_dir)
+    assert s.models is not None
+    assert len(s.models) == 1
+    assert s.models[0].name == "model_bin"
+    assert s.models[0].source == bin_file
+
+
+def test_model_discovery_ftz_preference(tmp_path):
+    """Test that .ftz is preferred over .bin when both are present in a model cache folder."""
+    cache_dir = tmp_path / "models"
+    model_dir = cache_dir / "model_both"
+    model_dir.mkdir(parents=True)
+    ftz_file = model_dir / "model.ftz"
+    bin_file = model_dir / "model.bin"
+    ftz_file.touch()
+    bin_file.touch()
+
+    s = Settings(data_dir=tmp_path, model_cache_dir=cache_dir)
+    assert s.models is not None
+    assert len(s.models) == 1
+    assert s.models[0].name == "model_both"
+    assert s.models[0].source == ftz_file
+
+
+def test_select_candidate_ambiguous(tmp_path):
+    """Test that select_candidate raises AmbiguousModelFileError for multiple .ftz files."""
+    from sulku.models import AmbiguousModelFileError, select_candidate
+
+    model_dir = tmp_path / "model_ambiguous"
+    model_dir.mkdir(parents=True)
+    (model_dir / "a.ftz").touch()
+    (model_dir / "b.ftz").touch()
+
+    with pytest.raises(AmbiguousModelFileError):
+        select_candidate(model_dir)
+
+
+def test_model_discovery_missing_or_empty_cache(tmp_path):
+    """Test that model discovery returns empty list if cache_dir does not exist or has no valid subdirectories."""
+    non_existent = tmp_path / "non_existent_cache"
+    s1 = Settings(data_dir=tmp_path, model_cache_dir=non_existent)
+    assert s1.models == []
+
+    empty_cache = tmp_path / "empty_cache"
+    empty_cache.mkdir()
+    s2 = Settings(data_dir=tmp_path, model_cache_dir=empty_cache)
+    assert s2.models == []
+
+
+def test_model_discovery_ambiguous_folder_handled(tmp_path):
+    """Test that model discovery handles folders with ambiguous candidates by raising AmbiguousModelFileError."""
+    from sulku.models import AmbiguousModelFileError
+
+    cache_dir = tmp_path / "models"
+    ambiguous_dir = cache_dir / "ambiguous_model"
+    ambiguous_dir.mkdir(parents=True)
+    (ambiguous_dir / "1.ftz").touch()
+    (ambiguous_dir / "2.ftz").touch()
+
+    with pytest.raises(AmbiguousModelFileError):
+        _ = Settings(data_dir=tmp_path, model_cache_dir=cache_dir)
+
 
 
 
@@ -118,8 +190,9 @@ def test_setup_nested():
 def test_app_lifespan_integration():
     """Test that FastAPI app creation and lifespan runs setup() and configures prediction service."""
     app = create_app()
-    with TestClient(app) as client:
+    with TestClient(app):
         # Inside active lifespan
         assert get_settings() is not None
         assert app.state.prediction_service.default_keep_alive == 300.0
+
 
