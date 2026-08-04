@@ -121,3 +121,5 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     chown -R vscode:vscode /app/.venv
 
 USER vscode
+
+CMD [ "sulku", "serve", "--host", "0.0.0.0", "--port", "8000" ]
