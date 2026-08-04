@@ -3,8 +3,9 @@
 {
 	"name": "Sulku",
 	"build": {
-		"dockerfile": "Dockerfile",
-		"context": ".."
+		"dockerfile": "../Dockerfile",
+		"context": "..",
+		"target": "development"
 	},
     "workspaceFolder": "/app",
     "mounts": [
