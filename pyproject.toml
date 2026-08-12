@@ -51,7 +51,7 @@ build-backend = "uv_build"
 
 
 [tool.uv.sources]
-niitti = { git = "https://github.com/Klikkikuri/Niitti.git" }
+niitti = { workspace = true }
 
 
 [dependency-groups]
