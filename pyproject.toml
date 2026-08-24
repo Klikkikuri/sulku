@@ -16,9 +16,21 @@ dependencies = [
     "niitti[all]",
     "openai>=2.46.0",
     "opentelemetry-api>=1.44.0",
+    # niitti's tracing provider exports over OTLP/HTTP; without this no spans leave the service.
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
     "opentelemetry-exporter-prometheus>=0.65b0",
+    # Instrumentors loaded by niitti's EXTRA_INSTRUMENTOR.
+    "opentelemetry-instrumentation-click>=0.65b0",
     "opentelemetry-instrumentation-fastapi>=0.65b0",
+    "opentelemetry-instrumentation-jinja2>=0.65b0",
     "opentelemetry-instrumentation-logging>=0.65b0",
+    "opentelemetry-instrumentation-openai-v2>=2.4b0",
+    "opentelemetry-instrumentation-requests>=0.65b0",
+    "opentelemetry-instrumentation-system-metrics>=0.65b0",
+    "opentelemetry-instrumentation-threading>=0.65b0",
+    "opentelemetry-instrumentation-urllib3>=0.65b0",
+    # Backs niitti's EXTRA_RESOURCE_DETECTOR container detector.
+    "opentelemetry-resource-detector-containerid>=0.65b0",
     "opentelemetry-sdk>=1.44.0",
     "platformdirs>=4.10.1",
     "pydantic>=2.13.4",

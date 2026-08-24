@@ -24,6 +24,19 @@ def temp_dataset():
         yield tmp_path
 
 
+def assert_aidetect_post(mock_post, content, content_type):
+    """
+    Assert the aidetect request, ignoring the W3C trace context headers that
+    ``_inject_trace_headers`` adds when tracing is active.
+    """
+    mock_post.assert_called_once()
+    args, kwargs = mock_post.call_args
+    assert args == ("http://127.0.0.1:8000/api/v1/aidetect/",)
+    assert kwargs["content"] == content
+    assert kwargs["timeout"] == 15.0
+    assert kwargs["headers"]["Content-Type"] == content_type
+
+
 def test_cli_sample_success(temp_dataset):
     """Test successful sampling from dataset."""
     runner = CliRunner()
@@ -288,12 +301,7 @@ def test_cli_detect_success(mock_post):
         assert "gemini-3.1-flash-lite: 0.8500 (confidence: 0.7000)" in result.output
         assert "Paragraphs:" in result.output
         assert "Paragraph 1 (1 sentences): score: 0.8500 | \"This is some sample text to analyze.\"" in result.output
-        mock_post.assert_called_once_with(
-            "http://127.0.0.1:8000/api/v1/aidetect/",
-            content="This is some sample text to analyze.",
-            headers={"Content-Type": "text/plain"},
-            timeout=15.0,
-        )
+        assert_aidetect_post(mock_post, "This is some sample text to analyze.", "text/plain")
 
 
 @patch("httpx.post")
@@ -321,12 +329,7 @@ def test_cli_detect_markdown_success(mock_post):
 
         assert result.exit_code == 0
         assert "Sending" in result.output
-        mock_post.assert_called_once_with(
-            "http://127.0.0.1:8000/api/v1/aidetect/",
-            content="This is some sample text to analyze.",
-            headers={"Content-Type": "text/markdown"},
-            timeout=15.0,
-        )
+        assert_aidetect_post(mock_post, "This is some sample text to analyze.", "text/markdown")
 
 
 @patch("httpx.post")
@@ -356,12 +359,7 @@ def test_cli_detect_html_success(mock_extract, mock_post):
         assert result.exit_code == 0
         assert "Sending" in result.output
         mock_extract.assert_called_once_with("<html><body><h1>Article</h1><p>Content</p></body></html>", output_format="markdown")
-        mock_post.assert_called_once_with(
-            "http://127.0.0.1:8000/api/v1/aidetect/",
-            content="Extracted markdown from local HTML file.",
-            headers={"Content-Type": "text/markdown"},
-            timeout=15.0,
-        )
+        assert_aidetect_post(mock_post, "Extracted markdown from local HTML file.", "text/markdown")
 
 
 @patch("trafilatura.extract")
@@ -410,12 +408,7 @@ def test_cli_detect_url_success(mock_fetch_url, mock_extract, mock_post):
     assert "AI-Generated: False" in result.output
     mock_fetch_url.assert_called_once_with("https://example.com/page")
     mock_extract.assert_called_once_with("<html><body>Some content</body></html>", output_format="markdown")
-    mock_post.assert_called_once_with(
-        "http://127.0.0.1:8000/api/v1/aidetect/",
-        content="Extracted content from URL",
-        headers={"Content-Type": "text/markdown"},
-        timeout=15.0,
-    )
+    assert_aidetect_post(mock_post, "Extracted content from URL", "text/markdown")
 
 
 @patch("trafilatura.fetch_url")
