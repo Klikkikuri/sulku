@@ -94,6 +94,9 @@ RUN useradd -m -u 1000 sulku && mkdir -p ${SULKU_DATA_DIR} && chown -R sulku:sul
 
 USER sulku
 
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
+    CMD [ "sulku-health" ]
+
 CMD [ "sulku", "serve", "--host", "0.0.0.0", "--port", "8000" ]
 
 # Development stage — devcontainers base image, dev deps, vscode user

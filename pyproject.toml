@@ -49,6 +49,11 @@ dependencies = [
 
 [project.scripts]
 sulku = "sulku.cli:main"
+# Separate entry point: the healthcheck must not pay the `sulku` package import cost.
+sulku-health = "sulku_health:main"
+
+[tool.uv.build-backend]
+module-name = ["sulku", "sulku_health"]
 
 [tool.black]
 line-length = 120
