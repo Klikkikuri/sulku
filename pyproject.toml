@@ -68,11 +68,14 @@ build-backend = "uv_build"
 
 
 [tool.uv.workspace]
-members = ["packages/niitti", "packages/sulku_gradio"]
+members = ["packages/sulku_gradio"]
 
 
 [tool.uv.sources]
-niitti = { workspace = true }
+# Niitti is a pinned git dependency, not a submodule. Sulku consumes Niitti and does not develop it, and Meri
+# vendors Niitti as a submodule. A second checkout under `packages/` made every Niitti merge move one pointer and
+# leave the other behind. Bump the revision with `scripts/sync-niitti.sh` in the Meri repository.
+niitti = { git = "https://github.com/Klikkikuri/Niitti.git", rev = "72e7d1fd615da4d1b8e4edd694f279e93f78dfad" }
 
 
 [dependency-groups]

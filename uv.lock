@@ -14,7 +14,6 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "niitti",
     "sulku",
     "sulku-gradio",
 ]
@@ -1570,7 +1569,10 @@ wheels = [
 [[package]]
 name = "niitti"
 version = "0.1.0"
-source = { editable = "packages/niitti" }
+source = { git = "https://github.com/Klikkikuri/Niitti.git?rev=72e7d1fd615da4d1b8e4edd694f279e93f78dfad#72e7d1fd615da4d1b8e4edd694f279e93f78dfad" }
+dependencies = [
+    { name = "platformdirs" },
+]
 
 [package.optional-dependencies]
 all = [
@@ -1580,29 +1582,6 @@ all = [
     { name = "pydantic-settings" },
     { name = "sentry-sdk" },
     { name = "structlog" },
-]
-logging = [
-    { name = "structlog" },
-]
-settings = [
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-]
-tracing = [
-    { name = "opentelemetry-instrumentation-logging" },
-    { name = "opentelemetry-sdk" },
-    { name = "sentry-sdk" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "niitti", extras = ["logging", "settings", "tracing"], marker = "extra == 'all'", editable = "packages/niitti" },
-    { name = "opentelemetry-instrumentation-logging", marker = "extra == 'tracing'", specifier = ">=0.50b0" },
-    { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.29.0" },
-    { name = "pydantic", marker = "extra == 'settings'", specifier = ">=2.10.5" },
-    { name = "pydantic-settings", marker = "extra == 'settings'", specifier = ">=2.7.1" },
-    { name = "sentry-sdk", marker = "extra == 'tracing'", specifier = ">=2.48.0" },
-    { name = "structlog", marker = "extra == 'logging'", specifier = ">=25.1.0" },
 ]
 
 [[package]]
@@ -3351,7 +3330,7 @@ requires-dist = [
     { name = "fasttext", specifier = ">=0.9.3" },
     { name = "huggingface-hub", specifier = ">=1.26.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "niitti", extras = ["all"], editable = "packages/niitti" },
+    { name = "niitti", extras = ["all"], git = "https://github.com/Klikkikuri/Niitti.git?rev=72e7d1fd615da4d1b8e4edd694f279e93f78dfad" },
     { name = "openai", specifier = ">=2.46.0" },
     { name = "opentelemetry-api", specifier = ">=1.44.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.44.0" },
