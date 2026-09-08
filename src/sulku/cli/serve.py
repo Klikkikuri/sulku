@@ -7,8 +7,12 @@ This module defines the CLI command to start the FastAPI HTTP server.
 
 import os
 import sys
+from pathlib import Path
+
 import click
 import uvicorn
+
+import sulku
 from sulku.http import create_app
 
 
@@ -35,6 +39,13 @@ DEFAULT_PORT = 8000
     "--reload",
     is_flag=True,
     help="Enable auto-reload for development.",
+)
+@click.option(
+    "--reload-dir",
+    "reload_dirs",
+    multiple=True,
+    type=click.Path(),
+    help="Directory to watch in reload mode. Repeatable. Defaults to the sulku package source.",
 )
 @click.option(
     "--preload",
@@ -66,6 +77,7 @@ def serve_cmd(
     host: str,
     port: int,
     reload: bool,
+    reload_dirs: tuple[str, ...],
     preload: bool,
     keep_alive: float,
     max_concurrent: int,
@@ -83,11 +95,17 @@ def serve_cmd(
             os.environ.setdefault("SULKU_PRELOAD", "true")
 
         if reload:
+            # Uvicorn watches the working directory by default. In the container that is /app,
+            # which also holds the .venv volume (~27k files) and the /app/data mount — a watch
+            # surface that costs CPU permanently and never contains reloadable source. Watch the
+            # package source only.
+            watch_dirs = list(reload_dirs) or [str(Path(sulku.__file__).resolve().parent)]
             uvicorn.run(
                 "sulku.http:create_app_from_env",
                 host=host,
                 port=port,
                 reload=True,
+                reload_dirs=watch_dirs,
                 factory=True,
             )
         else:
