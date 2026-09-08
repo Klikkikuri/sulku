@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "niitti",
     "click>=8.4.2",
     "fastapi>=0.139.2",
     "fasttext>=0.9.3",
