@@ -1,9 +1,6 @@
-import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, Literal, cast
-
-from platformdirs import user_data_dir
 
 from niitti import (
     LoggingSettings,
@@ -13,6 +10,7 @@ from niitti import (
     setup_logging,
     setup_tracing,
 )
+from niitti.paths import data_dir, ensure_dir
 from niitti.sentry import setup_sentry
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,24 +24,22 @@ LogLevelType = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 _setup_active: bool = False
 _active_settings: "Settings | None" = None
 
-# Default data directory resolved via platformdirs (falls back to XDG_DATA_HOME)
 def _get_default_data_dir() -> Path:
+    """
+    Default data directory, resolved by niitti.
 
-    _data_dir = os.environ.get("SULKU_DATA_DIR")
-    _fallback_data_dir = user_data_dir(appname="sulku", appauthor="klikkikuri")
+    ``SULKU_DATA_DIR`` names the directory itself, and applies whether or not it exists yet — a fresh volume is
+    mounted empty, and this is the code that creates it. Without the variable the user data directory is used.
+    """
+    directory = data_dir("sulku", env_var="SULKU_DATA_DIR")
 
-    if _data_dir and Path(_data_dir).exists():
-        DATA_DIR = Path(_data_dir)
-    else:
-        DATA_DIR = Path(_fallback_data_dir)
-
-    if not DATA_DIR.exists():
+    if not directory.exists():
         try:
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            logger.debug("Created default data directory at '%s'", DATA_DIR)
+            ensure_dir(directory)
+            logger.debug("Created default data directory at '%s'", directory)
         except Exception as e:
-            logger.error("Failed to create default data directory at '%s': %s", DATA_DIR, e)
-    return DATA_DIR
+            logger.error("Failed to create default data directory at '%s': %s", directory, e)
+    return directory
 
 class Settings(BaseSettings):
     """
